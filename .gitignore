@@ -1,6 +1,6 @@
 # ------ Project ---------------------------------------------------------------
 results/
-configs/*/*
+# configs/*/*
 misc/
 nohup
 nohup.out
