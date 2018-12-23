@@ -1,0 +1,17 @@
+
+game: Gravitar
+step_no: 50000000
+seed: no  # randomize if 0 or no
+
+double: False
+prioritized: False
+
+lr: 0.00025
+adam_eps: 0.00015
+update_freq: 4
+epsilon_steps: 1000000
+target_update: 30000
+
+learn_start: 80000
+mem_size: 1000000
+log_freq: 10
