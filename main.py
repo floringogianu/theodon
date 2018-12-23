@@ -111,7 +111,7 @@ def run(opt):
 
     # construct an epsilon greedy policy
     # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
-    epsilon = get_epsilon(steps=opt.epsilon_steps)
+    epsilon = get_epsilon(steps=opt.epsilon_steps, end=opt.epsilon_end)
     policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
 
     # construct a policy improvement type
