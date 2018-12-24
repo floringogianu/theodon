@@ -9,9 +9,13 @@ lr: 0.00025
 adam_eps: 0.00015
 update_freq: 4
 epsilon_steps: 1000000
-epsilon_end: 0.1  # != DQN
-target_update: 10000  # != DQN
+epsilon_end: 0.1  # != DDQN
+target_update: 10000  # != DDQN
 
 learn_start: 80000
 mem_size: 1000000
-log_freq: 10
+log_freq: 100
+
+test_freq: 500000
+test_steps: 500000
+test_epsilon: 0.001

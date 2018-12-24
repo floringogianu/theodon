@@ -14,4 +14,8 @@ target_update: 30000  # != DQN
 
 learn_start: 80000
 mem_size: 1000000
-log_freq: 10
+log_freq: 100
+
+test_freq: 500000
+test_steps: 500000
+test_epsilon: 0.001
