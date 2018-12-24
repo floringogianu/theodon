@@ -10,8 +10,13 @@ lr: 0.00025
 adam_eps: 0.00015
 update_freq: 4
 epsilon_steps: 1000000
-target_update: 30000
+epsilon_end: 0.1
+target_update: 10000
 
 learn_start: 80000
 mem_size: 1000000
 log_freq: 10
+
+test_freq: 500000
+test_steps: 200000
+test_epsilon: 0.001

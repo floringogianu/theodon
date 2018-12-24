@@ -2,6 +2,7 @@
 """
 import time
 import random
+from copy import deepcopy
 from functools import partial
 
 import torch
@@ -15,6 +16,7 @@ from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
 # from wintermute.policy_improvement import get_optimizer
 from wintermute.policy_improvement import DQNPolicyImprovement
+from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from wintermute.replay import NaiveExperienceReplay as ER
 from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
@@ -85,8 +87,56 @@ def train(opt):
                 train_log.reset()
 
         warmed_up = len(opt.experience_replay) > opt.learn_start
+
+        # testing
+        if step % opt.test_freq == 0:
+            test(opt, step, opt.policy_evaluation, opt.test_env, opt.log)
+
     opt.log.log(train_log, step)
     train_log.reset()
+
+
+def test(opt, crt_step, policy, env, log):
+    """ Here we do the training.
+
+        DeepMind uses a constant epsilon schedule with a very small value
+        instead  of a completely Deterministic Policy.
+    """
+    estimator = deepcopy(policy.policy.estimator)  # ugly hack
+    epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
+    policy_evaluation = EpsilonGreedyPolicy(
+        estimator, policy.action_space, epsilon
+    )
+
+    test_log = log.groups["testing"]
+    log.log_info(test_log, f"Start testing at {crt_step} training steps.")
+
+    state, reward, done = env.reset(), 0, False
+    for step in range(1, opt.test_steps + 1):
+
+        pi = policy_evaluation(state)
+        _, reward, done, _ = env.step(pi.action)
+
+        # do some logging
+        test_log.update(
+            ep_cnt=(1 if done else 0),
+            rw_per_ep=(reward, (1 if done else 0)),
+            rw_per_step=reward,
+            max_q=pi.q_value,
+            test_fps=1,
+        )
+
+        if done:
+            _, reward, done = env.reset(), 0, False
+
+        report_freq = int(opt.test_steps / 2)
+        if step % report_freq == 0 and step != opt.test_steps:
+            log.log_info(test_log, f"Partial test results.")
+            log.log(test_log, step)
+
+    log.log_info(test_log, f"Partial test results.")
+    log.log(test_log, step)
+    test_log.reset()
 
 
 def run(opt):
@@ -97,10 +147,9 @@ def run(opt):
     torch.manual_seed(opt.seed)
 
     # wrap the gym env
-    env = get_wrapped_atari(
-        f"{opt.game}NoFrameskip-v4", mode="training", hist_len=4
-    )
-    print(env)
+    env_name = f"{opt.game}NoFrameskip-v4"
+    env = get_wrapped_atari(env_name, mode="training", hist_len=4)
+    test_env = get_wrapped_atari(env_name, mode="testing", hist_len=4)
 
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
@@ -116,9 +165,7 @@ def run(opt):
 
     # construct a policy improvement type
     # optimizer = get_optimizer('Adam', estimator, lr=0.0001, eps=0.0003)
-    optimizer = optim.Adam(
-        estimator.parameters(), lr=opt.lr, eps=opt.adam_eps
-    )
+    optimizer = optim.Adam(estimator.parameters(), lr=opt.lr, eps=opt.adam_eps)
     policy_improvement = DQNPolicyImprovement(
         estimator, optimizer, gamma=0.99, is_double=opt.double
     )
@@ -136,9 +183,6 @@ def run(opt):
         experience_replay = ER(1_000_000, batch_size=32)
         # experience_replay = ER(100000, batch_size=32, hist_len=4)  # flat
 
-    # construct a tester
-    tester = None
-
     log = Logger(label="label", path=opt.out_dir)
     train_log = log.add_group(
         tag="training",
@@ -152,15 +196,26 @@ def run(opt):
         ),
         console_options=("white", "on_blue", ["bold"]),
     )
+    test_log = log.add_group(
+        tag="testing",
+        metrics=(
+            log.SumMetric("ep_cnt", resetable=False),
+            log.AvgMetric("rw_per_ep", emph=True),
+            log.AvgMetric("rw_per_step"),
+            log.MaxMetric("max_q"),
+            log.FPSMetric("test_fps"),
+        ),
+        console_options=("white", "on_magenta", ["bold"]),
+    )
     log.log_info(train_log, "date: %s." % time.strftime("%d/%m/%Y | %H:%M:%S"))
     log.log_info(train_log, "pytorch v%s." % torch.__version__)
 
     # Add the created objects in the opt namespace
     opt.env = env
+    opt.test_env = test_env
     opt.policy_evaluation = policy_evaluation
     opt.policy_improvement = policy_improvement
     opt.experience_replay = experience_replay
-    opt.tester = tester
     opt.log = log
     if opt.prioritized:
         opt.priority_update = priority_update_cb
