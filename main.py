@@ -147,14 +147,17 @@ def run(opt):
     torch.manual_seed(opt.seed)
 
     # wrap the gym env
-    env_name = f"{opt.game}NoFrameskip-v4"
-    env = get_wrapped_atari(env_name, mode="training", hist_len=4)
-    test_env = get_wrapped_atari(env_name, mode="testing", hist_len=4)
+    env = get_wrapped_atari(
+        opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym
+    )
+    test_env = get_wrapped_atari(
+        opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
+    )
 
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
     estimator = get_estimator(
-        "atari", hist_len=4, action_no=action_no, hidden_sz=256
+        "atari", hist_len=4, action_no=action_no, hidden_sz=512
     )
     estimator = estimator.cuda()
 
@@ -164,8 +167,9 @@ def run(opt):
     policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
 
     # construct a policy improvement type
-    # optimizer = get_optimizer('Adam', estimator, lr=0.0001, eps=0.0003)
-    optimizer = optim.Adam(estimator.parameters(), lr=opt.lr, eps=opt.adam_eps)
+    optimizer = optim.RMSprop(
+        estimator.parameters(), lr=opt.lr, momentum=0.95, eps=0.01
+    )
     policy_improvement = DQNPolicyImprovement(
         estimator, optimizer, gamma=0.99, is_double=opt.double
     )
