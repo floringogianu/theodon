@@ -1,4 +1,4 @@
-game: RoadRunnder
+game: road_runner
 no_gym: yes
 step_no: 25000000
 seed: no  # randomize if 0 or no

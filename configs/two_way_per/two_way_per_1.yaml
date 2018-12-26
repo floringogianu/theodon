@@ -1,4 +1,4 @@
 _experiment_parameters:
-  game: Seaquest
-game: Seaquest
-title: game=Seaquest
+  game: seaquest
+game: seaquest
+title: game=seaquest
