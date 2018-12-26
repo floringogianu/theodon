@@ -1,4 +1,5 @@
 game: RoadRunnder
+no_gym: yes
 step_no: 25000000
 seed: no  # randomize if 0 or no
 
@@ -6,7 +7,6 @@ double: yes  # != DQN
 prioritized: yes
 
 lr: 0.00025
-adam_eps: 0.00015
 update_freq: 4
 epsilon_steps: 1000000
 epsilon_end: 0.01  # != DQN
@@ -18,4 +18,4 @@ log_freq: 100
 
 test_freq: 500000
 test_steps: 100000
-test_epsilon: 0.001
+test_epsilon: 0.05  # debatable
