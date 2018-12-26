@@ -17,5 +17,5 @@ mem_size: 1000000
 log_freq: 10
 
 test_freq: 500000
-test_steps: 200000
+test_episodes: 10
 test_epsilon: 0.05

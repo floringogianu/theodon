@@ -111,26 +111,29 @@ def test(opt, crt_step, policy, env, log):
     test_log = log.groups["testing"]
     log.log_info(test_log, f"Start testing at {crt_step} training steps.")
 
-    state, reward, done = env.reset(), 0, False
-    for step in range(1, opt.test_steps + 1):
+    done = True
+    for _ in range(1, opt.test_episodes + 1):
+        while True:
+            if done:
+                state, reward, done = env.reset(), 0, False
 
-        pi = policy_evaluation(state)
-        _, reward, done, _ = env.step(pi.action)
+            pi = policy_evaluation(state)
+            _, reward, done, _ = env.step(pi.action)
 
-        # do some logging
-        test_log.update(
-            ep_cnt=(1 if done else 0),
-            rw_per_ep=(reward, (1 if done else 0)),
-            rw_per_step=reward,
-            max_q=pi.q_value,
-            test_fps=1,
-        )
-
-        if done:
-            _, reward, done = env.reset(), 0, False
+            # do some logging
+            test_log.update(
+                ep_cnt=(1 if done else 0),
+                rw_per_ep=(reward, (1 if done else 0)),
+                step_per_ep=(1, (1 if done else 0)),
+                rw_per_step=reward,
+                max_q=pi.q_value,
+                test_fps=1,
+            )
+            if done:
+                break
 
     log.log_info(test_log, f"Evaluation results.")
-    log.log(test_log, step)
+    log.log(test_log, crt_step)
     test_log.reset()
 
 
@@ -186,7 +189,7 @@ def run(opt):
     train_log = log.add_group(
         tag="training",
         metrics=(
-            log.SumMetric("ep_cnt", resetable=False),
+            log.SumMetric("ep_cnt"),
             log.AvgMetric("rw_per_ep", emph=True),
             log.AvgMetric("rw_per_step"),
             log.MaxMetric("max_q"),
@@ -200,6 +203,7 @@ def run(opt):
         metrics=(
             log.SumMetric("ep_cnt", resetable=False),
             log.AvgMetric("rw_per_ep", emph=True),
+            log.AvgMetric("step_per_ep"),
             log.AvgMetric("rw_per_step"),
             log.MaxMetric("max_q"),
             log.FPSMetric("test_fps"),
