@@ -201,7 +201,7 @@ def run(opt):
     test_log = log.add_group(
         tag="testing",
         metrics=(
-            log.SumMetric("ep_cnt", resetable=False),
+            log.SumMetric("ep_cnt"),
             log.AvgMetric("rw_per_ep", emph=True),
             log.AvgMetric("step_per_ep"),
             log.AvgMetric("rw_per_step"),
