@@ -1,4 +1,3 @@
-
 game: gravitar
 no_gym: yes
 step_no: 50000000
@@ -19,4 +18,4 @@ log_freq: 10
 
 test_freq: 500000
 test_steps: 200000
-test_epsilon: 0.001
+test_epsilon: 0.05

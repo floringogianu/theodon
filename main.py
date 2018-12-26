@@ -129,12 +129,7 @@ def test(opt, crt_step, policy, env, log):
         if done:
             _, reward, done = env.reset(), 0, False
 
-        report_freq = int(opt.test_steps / 2)
-        if step % report_freq == 0 and step != opt.test_steps:
-            log.log_info(test_log, f"Partial test results.")
-            log.log(test_log, step)
-
-    log.log_info(test_log, f"Partial test results.")
+    log.log_info(test_log, f"Evaluation results.")
     log.log(test_log, step)
     test_log.reset()
 
