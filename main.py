@@ -118,7 +118,7 @@ def test(opt, crt_step, policy, env, log):
                 state, reward, done = env.reset(), 0, False
 
             pi = policy_evaluation(state)
-            _, reward, done, _ = env.step(pi.action)
+            state, reward, done, _ = env.step(pi.action)
 
             # do some logging
             test_log.update(
