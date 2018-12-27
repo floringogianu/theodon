@@ -86,7 +86,7 @@ def train(opt):
                 opt.log.log(train_log, step)
                 train_log.reset()
 
-        warmed_up = len(opt.experience_replay) > opt.learn_start
+        warmed_up = step > opt.learn_start
 
         # testing
         if step % opt.test_freq == 0:
@@ -182,7 +182,7 @@ def run(opt):
         )
         priority_update_cb = partial(priority_update, experience_replay)
     else:
-        experience_replay = ER(1_000_000, batch_size=32)
+        experience_replay = ER(opt.mem_size, batch_size=32)
         # experience_replay = ER(100000, batch_size=32, hist_len=4)  # flat
 
     log = Logger(label="label", path=opt.out_dir)
