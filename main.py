@@ -43,7 +43,7 @@ def train(opt):
 
     state, reward, done = env.reset(), 0, False
     warmed_up = False
-    ep_cnt = 0
+    ep_cnt, best_rw = 0, -float("inf")
     for step in range(1, opt.step_no + 1):
 
         # take action and save the s to _s and a to _a to be used later
@@ -90,7 +90,20 @@ def train(opt):
 
         # testing
         if step % opt.test_freq == 0:
-            test(opt, step, opt.policy_evaluation, opt.test_env, opt.log)
+            mean_ep_rw = test(
+                opt, step, opt.policy_evaluation, opt.test_env, opt.log
+            )
+            # save model
+            if mean_ep_rw > best_rw:
+                opt.log.log_info(
+                    train_log,
+                    f"New best model: {mean_ep_rw:8.2f} rw/ep @ {step} steps!",
+                )
+                torch.save(
+                    opt.policy_evaluation.policy.estimator.state_dict(),
+                    f"{opt.out_dir}/model_{step}.pth",
+                )
+                best_rw = mean_ep_rw
 
     opt.log.log(train_log, step)
     train_log.reset()
@@ -111,6 +124,7 @@ def test(opt, crt_step, policy, env, log):
     test_log = log.groups["testing"]
     log.log_info(test_log, f"Start testing at {crt_step} training steps.")
 
+    total_rw = 0  # TODO: figure out how to use the logger instead
     done = True
     for _ in range(1, opt.test_episodes + 1):
         while True:
@@ -129,12 +143,16 @@ def test(opt, crt_step, policy, env, log):
                 max_q=pi.q_value,
                 test_fps=1,
             )
+            total_rw += reward
+
             if done:
                 break
 
     log.log_info(test_log, f"Evaluation results.")
     log.log(test_log, crt_step)
     test_log.reset()
+
+    return total_rw / opt.test_episodes
 
 
 def run(opt):
