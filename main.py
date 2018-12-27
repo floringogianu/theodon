@@ -65,8 +65,8 @@ def train(opt):
             else:
                 opt.policy_improvement(batch)
 
-            if step % opt.target_update == 0:
-                opt.policy_improvement.update_target_estimator()
+        if step % opt.target_update == 0 and warmed_up:
+            opt.policy_improvement.update_target_estimator()
 
         # do some logging
         train_log.update(
