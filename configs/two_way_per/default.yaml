@@ -1,15 +1,15 @@
-game: RoadRunnder
+game: road_runner
 no_gym: yes
-step_no: 25000000
+step_no: 18750000
 seed: no  # randomize if 0 or no
 
 double: yes  # != DQN
 prioritized: yes
 
-lr: 0.00025
+lr: 0.0000625  # != DDQN
 update_freq: 4
 epsilon_steps: 1000000
-epsilon_end: 0.01  # != DQN
+epsilon_end: 0.01  # != DQN (not explicit)
 target_update: 30000  # != DQN
 
 learn_start: 80000
@@ -17,5 +17,5 @@ mem_size: 1000000
 log_freq: 1000
 
 test_freq: 500000
-test_episodes: 20
-test_epsilon: 0.05  # debatable
+test_episodes: 100  # ~500000 frames
+test_epsilon: 0.01  # != DQN (table 5 in PER)
