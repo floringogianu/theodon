@@ -93,17 +93,32 @@ def train(opt):
             mean_ep_rw = test(
                 opt, step, opt.policy_evaluation, opt.test_env, opt.log
             )
-            # save model
+            # save best model
+            model = opt.policy_evaluation.policy.estimator.state_dict()
             if mean_ep_rw > best_rw:
                 opt.log.log_info(
                     train_log,
                     f"New best model: {mean_ep_rw:8.2f} rw/ep @ {step} steps!",
                 )
                 torch.save(
-                    opt.policy_evaluation.policy.estimator.state_dict(),
-                    f"{opt.out_dir}/model_{step}.pth",
+                    {
+                        "rw_per_ep": mean_ep_rw,
+                        "step": step,
+                        "model": model,
+                    },
+                    f"{opt.out_dir}/best_model.pth",
                 )
                 best_rw = mean_ep_rw
+            # save model
+            if step % 1_000_000 == 0:
+                torch.save(
+                    {
+                        "rw_per_ep": mean_ep_rw,
+                        "step": step,
+                        "model": model,
+                    },
+                    f"{opt.out_dir}/model_{step}.pth",
+                )
 
     opt.log.log(train_log, step)
     train_log.reset()
