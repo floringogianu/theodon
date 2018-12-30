@@ -1,0 +1,21 @@
+game: road_runner
+no_gym: yes
+step_no: 18750000
+seed: no  # randomize if 0 or no
+
+double: yes  # != DQN
+prioritized: no
+
+lr: 0.00025
+update_freq: 4
+epsilon_steps: 1000000
+epsilon_end: 0.01  # != DQN
+target_update: 30000  # != DQN
+
+learn_start: 50000
+mem_size: 1000000
+log_freq: 1000
+
+test_freq: 100000
+test_episodes: 50  # ~500000 frames
+test_epsilon: 0.01  # != DQN
