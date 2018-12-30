@@ -12,10 +12,10 @@ epsilon_steps: 1000000
 epsilon_end: 0.1  # != DDQN
 target_update: 10000  # != DDQN
 
-learn_start: 80000
+learn_start: 50000
 mem_size: 1000000
 log_freq: 1000
 
-test_freq: 500000
-test_episodes: 100  # ~500000 frames
+test_freq: 100000
+test_episodes: 50  # ~500000 frames  # ~500000 frames
 test_epsilon: 0.05
