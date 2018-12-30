@@ -142,14 +142,18 @@ def train(opt):
 
 
 def process_test_results(opt, new_test_results, best_rw) -> float:
+    """Here we process the results of a new evaluation.
+
+       We save the model if needed. The function returns the higher value
+       between the previous best reward and the current result.
+    """
     test_step, test_estimator, mean_ep_rw = new_test_results
     train_log = opt.log.groups["training"]
     # save best model
     model = test_estimator.state_dict()
     if mean_ep_rw > best_rw:
         opt.log.log_info(
-            train_log,
-            f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!",
+            train_log, f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!"
         )
         torch.save(
             {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
@@ -163,6 +167,7 @@ def process_test_results(opt, new_test_results, best_rw) -> float:
             f"{opt.out_dir}/model_{test_step}.pth",
         )
     return best_rw
+
 
 def test(opt, crt_step, estimator, action_space, env, log):
     """ Here we do the training.
