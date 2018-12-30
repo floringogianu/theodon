@@ -100,7 +100,7 @@ def train(opt):
         if async_result is not None:
             # pylint: disable=E0633
             test_step, test_estimator, result = async_result
-            if result.done() or (step == opt.step_no + 1):
+            if result.done():
                 mean_ep_rw = result.result()
                 new_test_results = test_step, test_estimator, mean_ep_rw
                 async_result = None
