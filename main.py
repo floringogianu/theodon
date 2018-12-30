@@ -4,6 +4,7 @@ import time
 import random
 from copy import deepcopy
 from functools import partial
+import concurrent.futures
 
 import torch
 from torch import optim
@@ -16,7 +17,6 @@ from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
 # from wintermute.policy_improvement import get_optimizer
 from wintermute.policy_improvement import DQNPolicyImprovement
-from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from wintermute.replay import NaiveExperienceReplay as ER
 from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
@@ -40,6 +40,13 @@ def train(opt):
     """
     env = opt.env
     train_log = opt.log.groups["training"]
+
+    async_result = None  # type: Optional[tuple]
+    new_test_results = None  # type: Tuple[int, nn.Module, float]
+
+    action_space = opt.policy_evaluation.action_space
+    if opt.test_async:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     state, reward, done = env.reset(), 0, False
     warmed_up = False
@@ -89,52 +96,83 @@ def train(opt):
         warmed_up = step > opt.learn_start
 
         # testing
+
+        if async_result is not None:
+            # pylint: disable=E0633
+            test_step, test_estimator, result = async_result
+            if result.done() or (step == opt.step_no + 1):
+                mean_ep_rw = result.result()
+                new_test_results = test_step, test_estimator, mean_ep_rw
+                async_result = None
+
         if step % opt.test_freq == 0:
-            mean_ep_rw = test(
-                opt, step, opt.policy_evaluation, opt.test_env, opt.log
-            )
-            # save best model
-            model = opt.policy_evaluation.policy.estimator.state_dict()
-            if mean_ep_rw > best_rw:
-                opt.log.log_info(
-                    train_log,
-                    f"New best model: {mean_ep_rw:8.2f} rw/ep @ {step} steps!",
+            if opt.test_async:
+                if async_result is not None:
+                    # Wait for the previous evaluation to end
+                    test_step, test_estimator, result = async_result
+                    mean_ep_rw = result.result()
+                    new_test_results = test_step, test_estimator, mean_ep_rw
+
+                _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                result = executor.submit(
+                    test, opt, step, _estimator, action_space, opt.test_env, opt.log
                 )
-                torch.save(
-                    {
-                        "rw_per_ep": mean_ep_rw,
-                        "step": step,
-                        "model": model,
-                    },
-                    f"{opt.out_dir}/best_model.pth",
+                async_result = (step, _estimator, result)
+            else:
+                test_estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                test_step = step
+                mean_ep_rw = test(
+                    opt, step, test_estimator, action_space, opt.test_env, opt.log
                 )
-                best_rw = mean_ep_rw
-            # save model
-            if step % 1_000_000 == 0:
-                torch.save(
-                    {
-                        "rw_per_ep": mean_ep_rw,
-                        "step": step,
-                        "model": model,
-                    },
-                    f"{opt.out_dir}/model_{step}.pth",
-                )
+                new_test_results = test_step, test_estimator, mean_ep_rw
+
+        if new_test_results is not None:
+            best_rw = process_test_results(opt, new_test_results, best_rw)
+            new_test_results = None
+
+    if async_result is not None:
+        # pylint: disable=E0633
+        test_step, test_estimator, result = async_result
+        mean_ep_rw = result.result()
+        new_test_results = test_step, test_estimator, mean_ep_rw
+        best_rw = process_test_results(opt, new_test_results, best_rw)
 
     opt.log.log(train_log, step)
     train_log.reset()
 
 
-def test(opt, crt_step, policy, env, log):
+def process_test_results(opt, new_test_results, best_rw) -> float:
+    test_step, test_estimator, mean_ep_rw = new_test_results
+    train_log = opt.log.groups["training"]
+    # save best model
+    model = test_estimator.state_dict()
+    if mean_ep_rw > best_rw:
+        opt.log.log_info(
+            train_log,
+            f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!",
+        )
+        torch.save(
+            {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
+            f"{opt.out_dir}/best_model.pth",
+        )
+        best_rw = mean_ep_rw
+    # save model
+    if test_step % 1_000_000 == 0:
+        torch.save(
+            {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
+            f"{opt.out_dir}/model_{test_step}.pth",
+        )
+    return best_rw
+
+def test(opt, crt_step, estimator, action_space, env, log):
     """ Here we do the training.
 
         DeepMind uses a constant epsilon schedule with a very small value
         instead  of a completely Deterministic Policy.
     """
-    estimator = deepcopy(policy.policy.estimator)  # ugly hack
+
     epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
-    policy_evaluation = EpsilonGreedyPolicy(
-        estimator, policy.action_space, epsilon
-    )
+    policy_evaluation = EpsilonGreedyPolicy(estimator, action_space, epsilon)
 
     test_log = log.groups["testing"]
     log.log_info(test_log, f"Start testing at {crt_step} training steps.")
@@ -178,18 +216,14 @@ def run(opt):
     torch.manual_seed(opt.seed)
 
     # wrap the gym env
-    env = get_wrapped_atari(
-        opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym
-    )
+    env = get_wrapped_atari(opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym)
     test_env = get_wrapped_atari(
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
     )
 
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
-    estimator = get_estimator(
-        "atari", hist_len=4, action_no=action_no, hidden_sz=512
-    )
+    estimator = get_estimator("atari", hist_len=4, action_no=action_no, hidden_sz=512)
     estimator = estimator.cuda()
 
     # construct an epsilon greedy policy

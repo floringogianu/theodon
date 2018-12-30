@@ -19,3 +19,4 @@ log_freq: 10
 test_freq: 100000
 test_episodes: 10
 test_epsilon: 0.05
+test_async: yes
