@@ -16,6 +16,6 @@ learn_start: 50000
 mem_size: 1000000
 log_freq: 1000
 
-test_freq: 100000
+test_freq: 250000
 test_episodes: 50  # ~500000 frames
 test_epsilon: 0.01  # != DQN
