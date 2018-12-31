@@ -238,7 +238,12 @@ def run(opt):
 
     # construct a policy improvement type
     optimizer = optim.RMSprop(
-        estimator.parameters(), lr=opt.lr, momentum=0.95, eps=0.01
+        estimator.parameters(),
+        lr=opt.lr,
+        momentum=0.0,
+        alpha=0.95,
+        eps=0.00001,
+        centered=True,
     )
     policy_improvement = DQNPolicyImprovement(
         estimator, optimizer, gamma=0.99, is_double=opt.double
