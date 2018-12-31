@@ -188,8 +188,8 @@ def test(opt, crt_step, estimator, action_space, env, log):
         while True:
             if done:
                 state, reward, done = env.reset(), 0, False
-
-            pi = policy_evaluation(state)
+            with torch.no_grad():
+                pi = policy_evaluation(state)
             state, reward, done, _ = env.step(pi.action)
 
             # do some logging
