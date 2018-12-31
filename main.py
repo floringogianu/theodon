@@ -17,7 +17,7 @@ from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
 # from wintermute.policy_improvement import get_optimizer
 from wintermute.policy_improvement import DQNPolicyImprovement
-from wintermute.replay import NaiveExperienceReplay as ER
+from wintermute.replay import MemoryEfficientExperienceReplay as ER
 from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
 import liftoff
@@ -228,7 +228,7 @@ def run(opt):
 
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
-    estimator = get_estimator("atari", hist_len=4, action_no=action_no, hidden_sz=512)
+    estimator = get_estimator("atari", hist_len=4, action_no=action_no, hidden_sz=512, init_method=opt.init_method)
     estimator = estimator.cuda()
 
     # construct an epsilon greedy policy
