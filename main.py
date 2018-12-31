@@ -101,22 +101,14 @@ def train(opt):
                     f"New best model: {mean_ep_rw:8.2f} rw/ep @ {step} steps!",
                 )
                 torch.save(
-                    {
-                        "rw_per_ep": mean_ep_rw,
-                        "step": step,
-                        "model": model,
-                    },
+                    {"rw_per_ep": mean_ep_rw, "step": step, "model": model},
                     f"{opt.out_dir}/best_model.pth",
                 )
                 best_rw = mean_ep_rw
             # save model
             if step % 1_000_000 == 0:
                 torch.save(
-                    {
-                        "rw_per_ep": mean_ep_rw,
-                        "step": step,
-                        "model": model,
-                    },
+                    {"rw_per_ep": mean_ep_rw, "step": step, "model": model},
                     f"{opt.out_dir}/model_{step}.pth",
                 )
 
@@ -199,7 +191,12 @@ def run(opt):
 
     # construct a policy improvement type
     optimizer = optim.RMSprop(
-        estimator.parameters(), lr=opt.lr, momentum=0.95, alpha=0.95, eps=0.01
+        estimator.parameters(),
+        lr=opt.lr,
+        momentum=0.0,
+        alpha=0.95,
+        eps=0.00001,
+        centered=True,
     )
     policy_improvement = DQNPolicyImprovement(
         estimator, optimizer, gamma=0.99, is_double=opt.double
