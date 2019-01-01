@@ -18,6 +18,7 @@ from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 # from wintermute.policy_improvement import get_optimizer
 from wintermute.policy_improvement import DQNPolicyImprovement
 from wintermute.replay import MemoryEfficientExperienceReplay as ER
+from wintermute.replay import PinnedExperienceReplay as PinnedER
 from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
 import liftoff
@@ -323,10 +324,9 @@ def test(opt, crt_step, estimator, action_space, env, log):
     nepisodes = 0
     done = True
     crt_return = 0
-    for _ in range(1, opt.test_steps + 1):
+    step = 0
+    while step < (opt.test_steps + 1) or not done:
         if done:
-            nepisodes += 1
-            total_rw += crt_return
             state, reward, done = env.reset(), 0, False
             crt_return = 0
         with torch.no_grad():
@@ -343,6 +343,11 @@ def test(opt, crt_step, estimator, action_space, env, log):
             test_fps=1,
         )
         crt_return += reward
+        step += 1
+
+        if done:
+            nepisodes += 1
+            total_rw += crt_return
 
     log.log_info(test_log, f"Evaluation results.")
     log.log(test_log, crt_step)
@@ -359,7 +364,13 @@ def run(opt):
     torch.manual_seed(opt.seed)
 
     # wrap the gym env
-    env = get_wrapped_atari(opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym, device=torch.device("cuda"))
+    env = get_wrapped_atari(
+        opt.game,
+        mode="training",
+        seed=opt.seed,
+        no_gym=opt.no_gym,
+        device=torch.device("cuda"),
+    )
     test_env = get_wrapped_atari(
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
     )
@@ -403,10 +414,14 @@ def run(opt):
         )
         priority_update_cb = partial(priority_update, experience_replay)
     else:
-        experience_replay = ER(
-            opt.mem_size, batch_size=32, async_memory=opt.async_memory
-        )
-        # experience_replay = ER(100000, batch_size=32, hist_len=4)  # flat
+        if opt.pinned_memory:
+            experience_replay = PinnedER(
+                opt.mem_size, batch_size=32, async_memory=opt.async_memory
+            )
+        else:
+            experience_replay = ER(
+                opt.mem_size, batch_size=32, async_memory=opt.async_memory
+            )
 
     log = Logger(label="label", path=opt.out_dir)
     train_log = log.add_group(

@@ -23,5 +23,7 @@ test_steps: 125000
 test_epsilon: 0.05
 
 async_eval: yes
-async_update: no
+async_update: yes
 async_memory: yes
+
+pinned_memory: yes
