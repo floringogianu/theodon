@@ -24,6 +24,7 @@ import liftoff
 from liftoff.config import read_config
 
 from src.utils import create_paths
+from src.utils import get_process_memory
 
 
 def priority_update(mem, dqn_loss):
@@ -35,18 +36,151 @@ def priority_update(mem, dqn_loss):
     return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
 
 
+def async_train(opt):
+    """ Here we do the async training.
+    """
+    env = opt.env
+    train_log = opt.log.groups["training"]
+
+    action_space = opt.policy_evaluation.action_space
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+
+    async_update_result = None
+    async_test_result = None
+    new_test_results = None
+
+    _state, _reward, _done = env.reset(), 0, False
+    _action = action_space.sample()
+    _next_state, reward, done, _ = env.step(_action)
+    state = _next_state
+
+    warmed_up = False
+    ep_cnt, best_rw = 0, -float("inf")
+
+    for step in range(1, opt.step_no + 1):
+
+        warmed_up = step > opt.learn_start  # We should learn
+        do_training = (step % opt.update_freq == 0) and warmed_up
+
+        if async_update_result is not None:
+            async_update_result.result()  # Wait for policy improvement
+            async_update_result = None
+
+        if step % opt.target_update == 0 and warmed_up:
+            opt.policy_improvement.update_target_estimator()
+
+        with torch.no_grad():
+            pi = opt.policy_evaluation(state)
+
+        # The code below is actually async
+
+        if do_training:
+            batch = opt.experience_replay.push_and_sample(
+                (_state, _action, _reward, _next_state, _done)
+            )
+            if opt.prioritized:
+                async_update_result = executor.submit(
+                    opt.policy_improvement, batch, cb=opt.priority_update
+                )
+            else:
+                async_update_result = executor.submit(opt.policy_improvement, batch)
+
+        else:
+            opt.experience_replay.push((_state, _action, _reward, _next_state, _done))
+
+        next_state, reward, done, _ = env.step(pi.action)
+        _state, _action, _reward, _next_state, _done = (
+            state,
+            pi.action,
+            reward,
+            next_state,
+            done,
+        )
+        state = next_state
+
+        # do some logging
+        train_log.update(
+            ep_cnt=(1 if done else 0),
+            rw_per_ep=(reward, (1 if done else 0)),
+            rw_per_step=reward,
+            max_q=pi.q_value,
+            sampling_fps=1,
+            training_fps=32 if do_training else 0,
+        )
+
+        if done:
+            state, reward, done = env.reset(), 0, False
+            ep_cnt += 1
+
+            if ep_cnt % opt.log_freq == 0:
+                used_ram, used_gpu = get_process_memory()
+                train_log.update(ram=used_ram, gpu=used_gpu)
+
+                opt.log.log(train_log, step)
+                train_log.reset()
+
+        # just testing below
+
+        if async_test_result is not None:
+            # pylint: disable=E0633
+            test_step, test_estimator, result = async_test_result
+            if result.done():
+                mean_ep_rw = result.result()
+                new_test_results = test_step, test_estimator, mean_ep_rw
+                async_test_result = None
+
+        if step % opt.test_freq == 0:
+            if async_update_result is not None:
+                async_update_result.result()
+                async_update_result = None
+
+            if opt.async_eval:
+                if async_test_result is not None:
+                    # Wait for the previous evaluation to end
+                    test_step, test_estimator, result = async_test_result
+                    mean_ep_rw = result.result()
+                    new_test_results = test_step, test_estimator, mean_ep_rw
+
+                _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                result = executor.submit(
+                    test, opt, step, _estimator, action_space, opt.test_env, opt.log
+                )
+                async_test_result = (step, _estimator, result)
+            else:
+                test_estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                test_step = step
+                mean_ep_rw = test(
+                    opt, step, test_estimator, action_space, opt.test_env, opt.log
+                )
+                new_test_results = test_step, test_estimator, mean_ep_rw
+
+        if new_test_results is not None:
+            best_rw = process_test_results(opt, new_test_results, best_rw)
+            new_test_results = None
+
+    if async_test_result is not None:
+        # pylint: disable=E0633
+        test_step, test_estimator, result = async_test_result
+        mean_ep_rw = result.result()
+        new_test_results = test_step, test_estimator, mean_ep_rw
+        best_rw = process_test_results(opt, new_test_results, best_rw)
+
+    opt.log.log(train_log, step)
+    train_log.reset()
+
+
 def train(opt):
     """ Here we do the training.
     """
     env = opt.env
     train_log = opt.log.groups["training"]
 
-    async_result = None  # type: Optional[tuple]
+    async_test_result = None  # type: Optional[tuple]
     new_test_results = None  # type: Tuple[int, nn.Module, float]
 
     action_space = opt.policy_evaluation.action_space
-    if opt.test_async:
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    if opt.async_eval:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
     state, reward, done = env.reset(), 0, False
     warmed_up = False
@@ -54,7 +188,8 @@ def train(opt):
     for step in range(1, opt.step_no + 1):
 
         # take action and save the s to _s and a to _a to be used later
-        pi = opt.policy_evaluation(state)
+        with torch.no_grad():
+            pi = opt.policy_evaluation(state)
         _state, _action = state, pi.action
         state, reward, done, _ = env.step(pi.action)
 
@@ -90,6 +225,8 @@ def train(opt):
             ep_cnt += 1
 
             if ep_cnt % opt.log_freq == 0:
+                used_ram, used_gpu = get_process_memory()
+                train_log.update(ram=used_ram, gpu=used_gpu)
                 opt.log.log(train_log, step)
                 train_log.reset()
 
@@ -97,19 +234,19 @@ def train(opt):
 
         # testing
 
-        if async_result is not None:
+        if async_test_result is not None:
             # pylint: disable=E0633
-            test_step, test_estimator, result = async_result
+            test_step, test_estimator, result = async_test_result
             if result.done():
                 mean_ep_rw = result.result()
                 new_test_results = test_step, test_estimator, mean_ep_rw
-                async_result = None
+                async_test_result = None
 
         if step % opt.test_freq == 0:
-            if opt.test_async:
-                if async_result is not None:
+            if opt.async_eval:
+                if async_test_result is not None:
                     # Wait for the previous evaluation to end
-                    test_step, test_estimator, result = async_result
+                    test_step, test_estimator, result = async_test_result
                     mean_ep_rw = result.result()
                     new_test_results = test_step, test_estimator, mean_ep_rw
 
@@ -117,7 +254,7 @@ def train(opt):
                 result = executor.submit(
                     test, opt, step, _estimator, action_space, opt.test_env, opt.log
                 )
-                async_result = (step, _estimator, result)
+                async_test_result = (step, _estimator, result)
             else:
                 test_estimator = deepcopy(opt.policy_evaluation.policy.estimator)
                 test_step = step
@@ -130,9 +267,9 @@ def train(opt):
             best_rw = process_test_results(opt, new_test_results, best_rw)
             new_test_results = None
 
-    if async_result is not None:
+    if async_test_result is not None:
         # pylint: disable=E0633
-        test_step, test_estimator, result = async_result
+        test_step, test_estimator, result = async_test_result
         mean_ep_rw = result.result()
         new_test_results = test_step, test_estimator, mean_ep_rw
         best_rw = process_test_results(opt, new_test_results, best_rw)
@@ -182,35 +319,36 @@ def test(opt, crt_step, estimator, action_space, env, log):
     test_log = log.groups["testing"]
     log.log_info(test_log, f"Start testing at {crt_step} training steps.")
 
-    total_rw = 0  # TODO: figure out how to use the logger instead
+    total_rw = 0
+    nepisodes = 0
     done = True
-    for _ in range(1, opt.test_episodes + 1):
-        while True:
-            if done:
-                state, reward, done = env.reset(), 0, False
-            with torch.no_grad():
-                pi = policy_evaluation(state)
-            state, reward, done, _ = env.step(pi.action)
+    crt_return = 0
+    for _ in range(1, opt.test_steps + 1):
+        if done:
+            nepisodes += 1
+            total_rw += crt_return
+            state, reward, done = env.reset(), 0, False
+            crt_return = 0
+        with torch.no_grad():
+            pi = policy_evaluation(state)
+        state, reward, done, _ = env.step(pi.action)
 
-            # do some logging
-            test_log.update(
-                ep_cnt=(1 if done else 0),
-                rw_per_ep=(reward, (1 if done else 0)),
-                step_per_ep=(1, (1 if done else 0)),
-                rw_per_step=reward,
-                max_q=pi.q_value,
-                test_fps=1,
-            )
-            total_rw += reward
-
-            if done:
-                break
+        # do some logging
+        test_log.update(
+            ep_cnt=(1 if done else 0),
+            rw_per_ep=(reward, (1 if done else 0)),
+            step_per_ep=(1, (1 if done else 0)),
+            rw_per_step=reward,
+            max_q=pi.q_value,
+            test_fps=1,
+        )
+        crt_return += reward
 
     log.log_info(test_log, f"Evaluation results.")
     log.log(test_log, crt_step)
     test_log.reset()
 
-    return total_rw / opt.test_episodes
+    return (total_rw / nepisodes) if nepisodes > 0 else crt_return
 
 
 def run(opt):
@@ -221,14 +359,20 @@ def run(opt):
     torch.manual_seed(opt.seed)
 
     # wrap the gym env
-    env = get_wrapped_atari(opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym)
+    env = get_wrapped_atari(opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym, device=torch.device("cuda"))
     test_env = get_wrapped_atari(
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
     )
 
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
-    estimator = get_estimator("atari", hist_len=4, action_no=action_no, hidden_sz=512, init_method=opt.init_method)
+    estimator = get_estimator(
+        "atari",
+        hist_len=4,
+        action_no=action_no,
+        hidden_sz=512,
+        init_method=opt.init_method,
+    )
     estimator = estimator.cuda()
 
     # construct an epsilon greedy policy
@@ -259,7 +403,9 @@ def run(opt):
         )
         priority_update_cb = partial(priority_update, experience_replay)
     else:
-        experience_replay = ER(opt.mem_size, batch_size=32)
+        experience_replay = ER(
+            opt.mem_size, batch_size=32, async_memory=opt.async_memory
+        )
         # experience_replay = ER(100000, batch_size=32, hist_len=4)  # flat
 
     log = Logger(label="label", path=opt.out_dir)
@@ -272,10 +418,12 @@ def run(opt):
             log.MaxMetric("max_q"),
             log.FPSMetric("training_fps"),
             log.FPSMetric("sampling_fps"),
+            log.MaxMetric("ram"),
+            log.MaxMetric("gpu"),
         ),
         console_options=("white", "on_blue", ["bold"]),
     )
-    test_log = log.add_group(
+    _test_log = log.add_group(
         tag="testing",
         metrics=(
             log.SumMetric("ep_cnt"),
@@ -305,7 +453,10 @@ def run(opt):
     print(liftoff.config.config_to_string(opt))
 
     # start the training
-    train(opt)
+    if opt.async_update:
+        async_train(opt)
+    else:
+        train(opt)
 
 
 def main():
