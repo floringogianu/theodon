@@ -42,6 +42,7 @@ def async_train(opt):
     """
     env = opt.env
     train_log = opt.log.groups["training"]
+    train_log.reset()
 
     action_space = opt.policy_evaluation.action_space
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
@@ -175,6 +176,7 @@ def train(opt):
     """
     env = opt.env
     train_log = opt.log.groups["training"]
+    train_log.reset()
 
     async_test_result = None  # type: Optional[tuple]
     new_test_results = None  # type: Tuple[int, nn.Module, float]
@@ -318,6 +320,7 @@ def test(opt, crt_step, estimator, action_space, env, log):
     policy_evaluation = EpsilonGreedyPolicy(estimator, action_space, epsilon)
 
     test_log = log.groups["testing"]
+    test_log.reset()
     log.log_info(test_log, f"Start testing at {crt_step} training steps.")
 
     total_rw = 0
@@ -325,7 +328,7 @@ def test(opt, crt_step, estimator, action_space, env, log):
     done = True
     crt_return = 0
     step = 0
-    while step < (opt.test_steps + 1) or not done:
+    while step < opt.test_steps or not done:
         if done:
             state, reward, done = env.reset(), 0, False
             crt_return = 0
@@ -353,7 +356,7 @@ def test(opt, crt_step, estimator, action_space, env, log):
     log.log(test_log, crt_step)
     test_log.reset()
 
-    return (total_rw / nepisodes) if nepisodes > 0 else crt_return
+    return total_rw / nepisodes
 
 
 def run(opt):
