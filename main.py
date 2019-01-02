@@ -4,6 +4,7 @@ import time
 import random
 from copy import deepcopy
 from functools import partial
+import concurrent.futures
 
 import torch
 from torch import optim
@@ -16,14 +17,15 @@ from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
 # from wintermute.policy_improvement import get_optimizer
 from wintermute.policy_improvement import DQNPolicyImprovement
-from wintermute.policy_evaluation import EpsilonGreedyPolicy
-from wintermute.replay import NaiveExperienceReplay as ER
+from wintermute.replay import MemoryEfficientExperienceReplay as ER
+from wintermute.replay import PinnedExperienceReplay as PinnedER
 from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
 import liftoff
 from liftoff.config import read_config
 
 from src.utils import create_paths
+from src.utils import get_process_memory
 
 
 def priority_update(mem, dqn_loss):
@@ -40,6 +42,14 @@ def train(opt):
     """
     env = opt.env
     train_log = opt.log.groups["training"]
+    train_log.reset()
+
+    async_test_result = None  # type: Optional[tuple]
+    new_test_results = None  # type: Tuple[int, nn.Module, float]
+
+    action_space = opt.policy_evaluation.action_space
+    if opt.async_eval:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
     state, reward, done = env.reset(), 0, False
     warmed_up = False
@@ -47,7 +57,8 @@ def train(opt):
     for step in range(1, opt.step_no + 1):
 
         # take action and save the s to _s and a to _a to be used later
-        pi = opt.policy_evaluation(state)
+        with torch.no_grad():
+            pi = opt.policy_evaluation(state)
         _state, _action = state, pi.action
         state, reward, done, _ = env.step(pi.action)
 
@@ -83,83 +94,135 @@ def train(opt):
             ep_cnt += 1
 
             if ep_cnt % opt.log_freq == 0:
+                used_ram, used_gpu = get_process_memory()
+                train_log.update(ram=used_ram, gpu=used_gpu)
                 opt.log.log(train_log, step)
                 train_log.reset()
 
         warmed_up = step > opt.learn_start
 
         # testing
+
+        if async_test_result is not None:
+            # pylint: disable=E0633
+            test_step, test_estimator, result = async_test_result
+            if result.done():
+                mean_ep_rw = result.result()
+                new_test_results = test_step, test_estimator, mean_ep_rw
+                async_test_result = None
+
         if step % opt.test_freq == 0:
-            mean_ep_rw = test(
-                opt, step, opt.policy_evaluation, opt.test_env, opt.log
-            )
-            # save best model
-            model = opt.policy_evaluation.policy.estimator.state_dict()
-            if mean_ep_rw > best_rw:
-                opt.log.log_info(
-                    train_log,
-                    f"New best model: {mean_ep_rw:8.2f} rw/ep @ {step} steps!",
+            if opt.async_eval:
+                if async_test_result is not None:
+                    # Wait for the previous evaluation to end
+                    test_step, test_estimator, result = async_test_result
+                    mean_ep_rw = result.result()
+                    new_test_results = test_step, test_estimator, mean_ep_rw
+
+                _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                result = executor.submit(
+                    test, opt, step, _estimator, action_space, opt.test_env, opt.log
                 )
-                torch.save(
-                    {"rw_per_ep": mean_ep_rw, "step": step, "model": model},
-                    f"{opt.out_dir}/best_model.pth",
+                async_test_result = (step, _estimator, result)
+            else:
+                test_estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                test_step = step
+                mean_ep_rw = test(
+                    opt, step, test_estimator, action_space, opt.test_env, opt.log
                 )
-                best_rw = mean_ep_rw
-            # save model
-            if step % 1_000_000 == 0:
-                torch.save(
-                    {"rw_per_ep": mean_ep_rw, "step": step, "model": model},
-                    f"{opt.out_dir}/model_{step}.pth",
-                )
+                new_test_results = test_step, test_estimator, mean_ep_rw
+
+        if new_test_results is not None:
+            best_rw = process_test_results(opt, new_test_results, best_rw)
+            new_test_results = None
+
+    if async_test_result is not None:
+        # pylint: disable=E0633
+        test_step, test_estimator, result = async_test_result
+        mean_ep_rw = result.result()
+        new_test_results = test_step, test_estimator, mean_ep_rw
+        best_rw = process_test_results(opt, new_test_results, best_rw)
 
     opt.log.log(train_log, step)
     train_log.reset()
 
 
-def test(opt, crt_step, policy, env, log):
+def process_test_results(opt, new_test_results, best_rw) -> float:
+    """Here we process the results of a new evaluation.
+
+       We save the model if needed. The function returns the higher value
+       between the previous best reward and the current result.
+    """
+    test_step, test_estimator, mean_ep_rw = new_test_results
+    train_log = opt.log.groups["training"]
+    # save best model
+    model = test_estimator.state_dict()
+    if mean_ep_rw > best_rw:
+        opt.log.log_info(
+            train_log, f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!"
+        )
+        torch.save(
+            {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
+            f"{opt.out_dir}/best_model.pth",
+        )
+        best_rw = mean_ep_rw
+    # save model
+    if test_step % 1_000_000 == 0:
+        torch.save(
+            {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
+            f"{opt.out_dir}/model_{test_step}.pth",
+        )
+    return best_rw
+
+
+def test(opt, crt_step, estimator, action_space, env, log):
     """ Here we do the training.
 
         DeepMind uses a constant epsilon schedule with a very small value
         instead  of a completely Deterministic Policy.
     """
-    estimator = deepcopy(policy.policy.estimator)  # ugly hack
+
     epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
-    policy_evaluation = EpsilonGreedyPolicy(
-        estimator, policy.action_space, epsilon
-    )
+    policy_evaluation = EpsilonGreedyPolicy(estimator, action_space, epsilon)
 
     test_log = log.groups["testing"]
+    test_log.reset()
     log.log_info(test_log, f"Start testing at {crt_step} training steps.")
 
-    total_rw = 0  # TODO: figure out how to use the logger instead
+    total_rw = 0
+    nepisodes = 0
     done = True
-    for _ in range(1, opt.test_episodes + 1):
-        while True:
-            if done:
-                state, reward, done = env.reset(), 0, False
-
+    crt_return = 0
+    step = 0
+    while step < opt.test_steps or not done:
+        if done:
+            state, reward, done = env.reset(), 0, False
+            crt_return = 0
+        with torch.no_grad():
             pi = policy_evaluation(state)
-            state, reward, done, _ = env.step(pi.action)
+        state, reward, done, _ = env.step(pi.action)
 
-            # do some logging
-            test_log.update(
-                ep_cnt=(1 if done else 0),
-                rw_per_ep=(reward, (1 if done else 0)),
-                step_per_ep=(1, (1 if done else 0)),
-                rw_per_step=reward,
-                max_q=pi.q_value,
-                test_fps=1,
-            )
-            total_rw += reward
+        # do some logging
+        test_log.update(
+            ep_cnt=(1 if done else 0),
+            rw_per_ep=(reward, (1 if done else 0)),
+            step_per_ep=(1, (1 if done else 0)),
+            rw_per_step=reward,
+            max_q=pi.q_value,
+            test_fps=1,
+        )
+        crt_return += reward
+        step += 1
 
-            if done:
-                break
+        if done:
+            nepisodes += 1
+            total_rw += crt_return
 
     log.log_info(test_log, f"Evaluation results.")
     log.log(test_log, crt_step)
     test_log.reset()
 
-    return total_rw / opt.test_episodes
+    return total_rw / nepisodes
 
 
 def run(opt):
@@ -171,7 +234,11 @@ def run(opt):
 
     # wrap the gym env
     env = get_wrapped_atari(
-        opt.game, mode="training", seed=opt.seed, no_gym=opt.no_gym
+        opt.game,
+        mode="training",
+        seed=opt.seed,
+        no_gym=opt.no_gym,
+        device=opt.mem_device,
     )
     test_env = get_wrapped_atari(
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
@@ -180,7 +247,10 @@ def run(opt):
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
     estimator = get_estimator(
-        "atari", hist_len=4, action_no=action_no, hidden_sz=512
+        "atari",
+        hist_len=4,
+        action_no=action_no,
+        hidden_sz=512,
     )
     estimator = estimator.cuda()
 
@@ -212,8 +282,17 @@ def run(opt):
         )
         priority_update_cb = partial(priority_update, experience_replay)
     else:
-        experience_replay = ER(opt.mem_size, batch_size=32)
-        # experience_replay = ER(100000, batch_size=32, hist_len=4)  # flat
+        if opt.pinned_memory:
+            experience_replay = PinnedER(
+                opt.mem_size,
+                batch_size=32,
+                async_memory=opt.async_memory,
+                device=opt.mem_device,
+            )
+        else:
+            experience_replay = ER(
+                opt.mem_size, batch_size=32, async_memory=opt.async_memory
+            )
 
     log = Logger(label="label", path=opt.out_dir)
     train_log = log.add_group(
@@ -225,10 +304,12 @@ def run(opt):
             log.MaxMetric("max_q"),
             log.FPSMetric("training_fps"),
             log.FPSMetric("sampling_fps"),
+            log.MaxMetric("ram"),
+            log.MaxMetric("gpu"),
         ),
         console_options=("white", "on_blue", ["bold"]),
     )
-    test_log = log.add_group(
+    _test_log = log.add_group(
         tag="testing",
         metrics=(
             log.SumMetric("ep_cnt"),
