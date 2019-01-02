@@ -4,6 +4,21 @@
 import os
 import argparse
 from datetime import datetime
+import gpustat
+import psutil
+
+
+def get_process_memory():
+    """ Returns both RAM and GPU memory for current process (in MB).
+    """
+    used_gpu = 0
+    for gpu in gpustat.new_query().gpus:
+        for proc in gpu.processes:
+            if proc["pid"] == os.getpid():
+                used_gpu = proc["gpu_memory_usage"]
+    process = psutil.Process(os.getpid())
+    used_ram = process.memory_info().rss * 1e-6
+    return  used_ram, used_gpu
 
 
 def create_paths(args: argparse.Namespace) -> argparse.Namespace:
