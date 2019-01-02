@@ -26,4 +26,4 @@ async_eval: yes
 async_update: yes
 async_memory: yes
 
-pinned_memory: yes
+mem_device: cuda
