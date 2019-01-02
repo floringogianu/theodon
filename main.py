@@ -121,14 +121,27 @@ def train(opt):
 
                 _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
                 result = executor.submit(
-                    test, opt, step, _estimator, action_space, opt.test_env, opt.log
+                    test,
+                    opt,
+                    step,
+                    _estimator,
+                    action_space,
+                    opt.test_env,
+                    opt.log,
                 )
                 async_test_result = (step, _estimator, result)
             else:
-                test_estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                test_estimator = deepcopy(
+                    opt.policy_evaluation.policy.estimator
+                )
                 test_step = step
                 mean_ep_rw = test(
-                    opt, step, test_estimator, action_space, opt.test_env, opt.log
+                    opt,
+                    step,
+                    test_estimator,
+                    action_space,
+                    opt.test_env,
+                    opt.log,
                 )
                 new_test_results = test_step, test_estimator, mean_ep_rw
 
@@ -159,7 +172,8 @@ def process_test_results(opt, new_test_results, best_rw) -> float:
     model = test_estimator.state_dict()
     if mean_ep_rw > best_rw:
         opt.log.log_info(
-            train_log, f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!"
+            train_log,
+            f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!",
         )
         torch.save(
             {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
@@ -247,10 +261,7 @@ def run(opt):
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
     estimator = get_estimator(
-        "atari",
-        hist_len=4,
-        action_no=action_no,
-        hidden_sz=512,
+        "atari", hist_len=4, action_no=action_no, hidden_sz=512
     )
     estimator = estimator.cuda()
 
