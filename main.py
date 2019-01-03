@@ -4,10 +4,13 @@ import time
 import random
 from copy import deepcopy
 from functools import partial
+from argparse import Namespace
 import concurrent.futures
-
+import pickle
+import numpy as np
 import torch
 from torch import optim
+import torch.multiprocessing as mp
 from rl_logger import Logger
 
 from wintermute.env_wrappers import get_wrapped_atari
@@ -49,7 +52,7 @@ def train(opt):
 
     action_space = opt.policy_evaluation.action_space
     if opt.async_eval:
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        executor = concurrent.futures.ProcessPoolExecutor(max_workers=3)
 
     state, reward, done = env.reset(), 0, False
     warmed_up = False
@@ -64,7 +67,6 @@ def train(opt):
 
         # add a (_s, _a, r, d) transition
         opt.experience_replay.push((_state, _action, reward, state, done))
-        # opt.experience_replay.push(_state[0, 3], _action, reward, done)
 
         # sample a batch and do some learning
         do_training = (step % opt.update_freq == 0) and warmed_up
@@ -122,11 +124,11 @@ def train(opt):
                 _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
                 result = executor.submit(
                     test,
-                    opt,
+                    opt.test_opt,
                     step,
                     _estimator,
                     action_space,
-                    opt.test_env,
+                    None,  # do not pickle test_env if evaluation is async
                     opt.log,
                 )
                 async_test_result = (step, _estimator, result)
@@ -136,7 +138,7 @@ def train(opt):
                 )
                 test_step = step
                 mean_ep_rw = test(
-                    opt,
+                    opt.test_opt,
                     step,
                     test_estimator,
                     action_space,
@@ -186,10 +188,17 @@ def process_test_results(opt, new_test_results, best_rw) -> float:
             {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
             f"{opt.out_dir}/model_{test_step}.pth",
         )
+
+    opt.evals.append(mean_ep_rw)
+    opt.evals = opt.evals[-5:]
+    summary = {"best": best_rw, "last-5": np.mean(opt.evals), "step": test_step}
+    with open(f"{opt.out_dir}/summary.pkl", "wb") as f:
+        pickle.dump(summary, f, pickle.HIGHEST_PROTOCOL)
+
     return best_rw
 
 
-def test(opt, crt_step, estimator, action_space, env, log):
+def test(opt, crt_step, estimator, action_space, test_env, log):
     """ Here we do the training.
 
         DeepMind uses a constant epsilon schedule with a very small value
@@ -197,7 +206,13 @@ def test(opt, crt_step, estimator, action_space, env, log):
     """
 
     epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
+    estimator.to("cuda")
     policy_evaluation = EpsilonGreedyPolicy(estimator, action_space, epsilon)
+
+    if test_env is None:
+        test_env = get_wrapped_atari(
+            opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
+        )
 
     test_log = log.groups["testing"]
     test_log.reset()
@@ -210,11 +225,11 @@ def test(opt, crt_step, estimator, action_space, env, log):
     step = 0
     while step < opt.test_steps or not done:
         if done:
-            state, reward, done = env.reset(), 0, False
+            state, reward, done = test_env.reset(), 0, False
             crt_return = 0
         with torch.no_grad():
             pi = policy_evaluation(state)
-        state, reward, done, _ = env.step(pi.action)
+        state, reward, done, _ = test_env.step(pi.action)
 
         # do some logging
         test_log.update(
@@ -254,9 +269,13 @@ def run(opt):
         no_gym=opt.no_gym,
         device=opt.mem_device,
     )
-    test_env = get_wrapped_atari(
-        opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
-    )
+
+    if opt.async_eval:
+        test_env = None
+    else:
+        test_env = get_wrapped_atari(
+            opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
+        )
 
     # construct an estimator to be used with the policy
     action_no = env.action_space.n
@@ -349,6 +368,16 @@ def run(opt):
     print("Starting experiment using the following settings:")
     print(liftoff.config.config_to_string(opt))
 
+    opt.test_opt = Namespace(
+        test_steps=opt.test_steps,
+        test_epsilon=opt.test_epsilon,
+        game=opt.game,
+        seed=opt.seed,
+        no_gym=opt.no_gym,
+    )
+
+    opt.evals = []
+
     # start the training
     train(opt)
 
@@ -369,4 +398,5 @@ def main():
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
     main()
