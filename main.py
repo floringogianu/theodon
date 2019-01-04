@@ -31,11 +31,10 @@ from src.utils import create_paths
 from src.utils import get_process_memory
 
 
-def priority_update(mem, dqn_loss):
+def priority_update(mem, losses):
     """ Callback for updating priorities in the proportional-based experience
     replay and for computing the importance sampling corrected loss.
     """
-    losses = dqn_loss.loss
     mem.update([loss.item() for loss in losses.detach().abs()])
     return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
 
