@@ -1,0 +1,30 @@
+game: space_invaders
+no_gym: yes
+step_no: 50000
+seed: no  # randomize if 0 or no
+
+double: False
+prioritized: False
+
+lr: 0.00025
+update_freq: 4
+epsilon_steps: 30000
+epsilon_end: 0.1
+target_update: 12000
+hist_len: 4
+hidden_sz: 512
+learn_start: 5000
+mem_size: 500000
+log_freq: 10
+learn_log_freq: 25000
+
+eval_freq: 7500
+eval_steps: 15000
+eval_epsilon: 0.05
+
+async_eval: yes
+async_update: no
+async_memory: no
+
+mem_device: cuda
+pinned_memory: no
