@@ -1,6 +1,8 @@
 """ Functions to be used in all training modes (serial / async).
 """
 
+import pickle
+import numpy as np
 import torch
 from src.utils import get_process_memory
 
@@ -75,6 +77,15 @@ def process_eval_results(opt, new_eval_results, best_rw) -> float:
             {"rw_per_ep": mean_ep_rw, "step": eval_step, "model": model},
             f"{opt.out_dir}/model_{eval_step}.pth",
         )
+
+    if not hasattr(opt, "evals"):
+        opt.evals = []
+    opt.evals.append(mean_ep_rw)
+    opt.evals = opt.evals[-5:]
+    summary = {"best": best_rw, "last-5": np.mean(opt.evals), "step": eval_step}
+    with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
+        pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
+
     return best_rw
 
 

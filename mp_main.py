@@ -3,7 +3,7 @@
 
 # pylint: disable=wrong-import-order
 
-from rl_routines import init_evaluator, init_learner, init_player
+from src.rl_routines import init_evaluator, init_learner, init_player
 
 if __name__ == "__main__":
     import torch
