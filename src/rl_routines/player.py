@@ -1,7 +1,7 @@
 """ Here are the functions for the async player.
 """
 
-from copy import deepcopy
+import time
 import torch
 from rl_logger import Logger
 from wintermute.env_wrappers import get_wrapped_atari
@@ -20,49 +20,64 @@ def play(opt):
     policy_evaluation = opt.policy_evaluation
     experience_queue = opt.experience_queue
     sync_queue = opt.sync_queue
-    eval_queue = opt.eval_queue
 
     state, reward, done = env.reset(), 0, False
-    warmed_up = False
-    training = False
     ep_cnt = 0
 
-    assert opt.learn_start % 100 == 0, "100 steps used in sync"
+    # Warm up
 
-    sent1, sent2 = [], []
-    last_state = None
-    for step in range(1, opt.step_no + 1):
+    start = time.time()
 
-        # take action and save the s to _s and a to _a to be used later
+    sent = []
+    for step in range(opt.learn_start):
+        with torch.no_grad():
+            pi = policy_evaluation(state)
+        _state, _action = state, pi.action
+        state, reward, done, _ = env.step(pi.action)
+        transition = (_state, _action, reward, state, done)
+        experience_queue.put(transition)
+        sent.append(transition)
+        play_log.update(
+            ep_cnt=int(done),
+            rw_per_ep=(reward, int(done)),
+            rw_per_step=reward,
+            max_q=pi.q_value,
+            playing_fps=1,
+        )
+        if done:
+            state, reward, done = env.reset(), 0, False
+            ep_cnt += 1
+        if not sync_queue.empty() or len(sent) > 1000:
+            sync_queue.get()
+            del sent[:100]
+
+    while sent:
+        sync_queue.get()
+        del sent[:100]
+
+    used_ram, used_gpu = get_process_memory()
+    play_log.update(ram=used_ram, gpu=used_gpu)
+    opt.log.log(play_log, step)
+    play_log.reset()
+
+    end = time.time()
+
+    opt.log.log_info(play_log, f"Warm up ends after {end-start:.2f}s. Learn!")
+
+    sent1 = []  # pylint: disable=unused-variable
+    for step in range(opt.learn_start + 1, opt.step_no + 1):
         with torch.no_grad():
             pi = opt.policy_evaluation(state)
         _state, _action = state, pi.action
         state, reward, done, _ = env.step(pi.action)
         transition = (_state, _action, reward, state, done)
         experience_queue.put(transition)
+        sent.append(transition)
 
-        do_training = (step % opt.update_freq == 0) and warmed_up
-
-        if do_training:
-            if training:
-                while sent1:
-                    sync_queue.get()
-                    del sent1[:100]
-                sync_queue.get()
-                sent2.clear()
+        if step % opt.update_freq == 0:
+            sync_queue.get()  # The network won't change until I send "train"
+            sent1, sent = sent, []  # Keep only the last four
             experience_queue.put("train")
-            training = True
-            sent2.append(transition)
-        elif warmed_up:
-            sent2.append(transition)
-        else:
-            sent1.append(transition)
-            if not sync_queue.empty():
-                sync_queue.get()
-                del sent1[:100]
-
-        if step % opt.target_update == 0 and warmed_up:
-            experience_queue.put("update_target")
 
         # do some logging
         play_log.update(
@@ -83,23 +98,8 @@ def play(opt):
                 opt.log.log(play_log, step)
                 play_log.reset()
 
-        warmed_up = step >= opt.learn_start
-        if step % opt.eval_freq == 0:
-            last_state = deepcopy(
-                policy_evaluation.policy.estimator.state_dict()
-            )
-            eval_queue.put((step, last_state))
 
-    eval_queue.put("done")
-    experience_queue.put("done")
-
-    used_ram, used_gpu = get_process_memory()
-    play_log.update(ram=used_ram, gpu=used_gpu)
-    opt.log.log(play_log, step)
-    play_log.reset()
-
-
-def init_player(opt, experience_queue, sync_queue, eval_queue):
+def init_player(opt, experience_queue, sync_queue):
     """ Function to serve as target for the player process.
     """
 
@@ -115,7 +115,7 @@ def init_player(opt, experience_queue, sync_queue, eval_queue):
             log.MaxMetric("ram"),
             log.MaxMetric("gpu"),
         ),
-        console_options=("white", "on_blue", ["bold"]),
+        console_options=("white", "on_green", ["bold"]),
     )
     env = get_wrapped_atari(
         opt.game,
@@ -135,6 +135,5 @@ def init_player(opt, experience_queue, sync_queue, eval_queue):
     opt.policy_evaluation = policy_evaluation
     opt.experience_queue = experience_queue
     opt.sync_queue = sync_queue
-    opt.eval_queue = eval_queue
 
     play(opt)
