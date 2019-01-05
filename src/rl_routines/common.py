@@ -81,8 +81,12 @@ def process_eval_results(opt, new_eval_results, best_rw) -> float:
     if not hasattr(opt, "evals"):
         opt.evals = []
     opt.evals.append(mean_ep_rw)
-    opt.evals = opt.evals[-5:]
-    summary = {"best": best_rw, "last-5": np.mean(opt.evals), "step": eval_step}
+    summary = {
+        "best": best_rw,
+        "last-5": np.mean(opt.evals[-5:]),
+        "last-10": np.mean(opt.evals[-10:]),
+        "step": eval_step,
+    }
     with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
         pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
 
