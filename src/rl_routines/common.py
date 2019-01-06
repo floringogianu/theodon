@@ -9,10 +9,11 @@ from rl_logger import Logger
 from src.utils import get_process_memory
 
 
-def init_eval_logger(out_dir):
+def init_eval_logger(out_dir=None, log: Logger = None):
     """ Here we initialize the logger used by other functions below.
     """
-    log = Logger(label="label", path=out_dir)
+    if log is None:
+        log = Logger(label="label", path=out_dir)
     log.add_group(
         tag="evaluation",
         metrics=(

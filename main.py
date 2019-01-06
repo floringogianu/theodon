@@ -1,9 +1,10 @@
 """ Entry point.
 """
-
+# pylint: disable=wrong-import-order
 import torch
+
 if __name__ == "__main__":
-    # pylint: disable=wrong-import-order
+
     torch.multiprocessing.set_start_method("spawn")
 
     import time
@@ -12,15 +13,18 @@ if __name__ == "__main__":
     from functools import partial
     from argparse import Namespace
     import concurrent.futures
-    import pickle
-    import numpy as np
 
     from torch import optim
-    from rl_logger import Logger
 
 from wintermute.env_wrappers import get_wrapped_atari
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
+
+from src.rl_routines.common import (
+    init_eval_logger,
+    process_eval_results,
+    evaluate_once,
+)
 
 if __name__ == "__main__":
     from wintermute.estimators import get_estimator
@@ -37,7 +41,6 @@ if __name__ == "__main__":
     from src.utils import create_paths
     from src.utils import get_process_memory
 
-
     def priority_update(mem, dqn_loss):
         """ Callback for updating priorities in the proportional-based experience
         replay and for computing the importance sampling corrected loss.
@@ -45,7 +48,6 @@ if __name__ == "__main__":
         losses = dqn_loss.loss
         mem.update([loss.item() for loss in losses.detach().abs()])
         return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
-
 
     def train(opt):
         """ Here we do the training.
@@ -116,8 +118,12 @@ if __name__ == "__main__":
                 # pylint: disable=E0633
                 test_step, test_estimator, result = async_test_result
                 if result.done():
-                    mean_ep_rw = result.result()
-                    new_test_results = test_step, test_estimator, mean_ep_rw
+                    avgs = result.result()
+                    new_test_results = (
+                        test_step,
+                        test_estimator.state_dict(),
+                        *avgs,
+                    )
                     async_test_result = None
 
             if step % opt.test_freq == 0:
@@ -125,10 +131,16 @@ if __name__ == "__main__":
                     if async_test_result is not None:
                         # Wait for the previous evaluation to end
                         test_step, test_estimator, result = async_test_result
-                        mean_ep_rw = result.result()
-                        new_test_results = test_step, test_estimator, mean_ep_rw
+                        avgs = result.result()
+                        new_test_results = (
+                            test_step,
+                            test_estimator.state_dict(),
+                            *avgs,
+                        )
 
-                    _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                    _estimator = deepcopy(
+                        opt.policy_evaluation.policy.estimator
+                    )
                     result = executor.submit(
                         test,
                         opt.test_opt,
@@ -144,7 +156,7 @@ if __name__ == "__main__":
                         opt.policy_evaluation.policy.estimator
                     )
                     test_step = step
-                    mean_ep_rw = test(
+                    avgs = test(
                         opt.test_opt,
                         step,
                         test_estimator,
@@ -152,59 +164,29 @@ if __name__ == "__main__":
                         opt.test_env,
                         opt.log,
                     )
-                    new_test_results = test_step, test_estimator, mean_ep_rw
+                    new_test_results = (
+                        test_step,
+                        test_estimator.state_dict(),
+                        *avgs,
+                    )
 
             if new_test_results is not None:
-                best_rw = process_test_results(opt, new_test_results, best_rw)
+                best_rw = process_eval_results(opt, new_test_results, best_rw)
                 new_test_results = None
 
         if async_test_result is not None:
             # pylint: disable=E0633
             test_step, test_estimator, result = async_test_result
-            mean_ep_rw = result.result()
-            new_test_results = test_step, test_estimator, mean_ep_rw
-            best_rw = process_test_results(opt, new_test_results, best_rw)
+            avgs = result.result()
+            new_test_results = (test_step, test_estimator.state_dict(), *avgs)
+            best_rw = process_eval_results(opt, new_test_results, best_rw)
 
         opt.log.log(train_log, step)
         train_log.reset()
 
 
-    def process_test_results(opt, new_test_results, best_rw) -> float:
-        """Here we process the results of a new evaluation.
-
-        We save the model if needed. The function returns the higher value
-        between the previous best reward and the current result.
-        """
-        test_step, test_estimator, mean_ep_rw = new_test_results
-        train_log = opt.log.groups["training"]
-        # save best model
-        model = test_estimator.state_dict()
-        if mean_ep_rw > best_rw:
-            opt.log.log_info(
-                train_log,
-                f"New best model: {mean_ep_rw:8.2f} rw/ep @ {test_step} steps!",
-            )
-            torch.save(
-                {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
-                f"{opt.out_dir}/best_model.pth",
-            )
-            best_rw = mean_ep_rw
-        # save model
-        if test_step % 1_000_000 == 0:
-            torch.save(
-                {"rw_per_ep": mean_ep_rw, "step": test_step, "model": model},
-                f"{opt.out_dir}/model_{test_step}.pth",
-            )
-
-        opt.evals.append(mean_ep_rw)
-        opt.evals = opt.evals[-5:]
-        summary = {"best": best_rw, "last-5": np.mean(opt.evals), "step": test_step}
-        with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
-            pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
-
-        return best_rw
-
 if __name__ in ["__mp_main__", "__main__"]:
+
     def test(opt, crt_step, estimator, action_space, test_env, log):
         """ Here we do the training.
 
@@ -214,52 +196,20 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
         estimator.to("cuda")
-        policy_evaluation = EpsilonGreedyPolicy(estimator, action_space, epsilon)
+        policy_evaluation = EpsilonGreedyPolicy(
+            estimator, action_space, epsilon
+        )
 
         if test_env is None:
             test_env = get_wrapped_atari(
                 opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
             )
 
-        test_log = log.groups["testing"]
-        test_log.reset()
-        log.log_info(test_log, f"Start testing at {crt_step} training steps.")
+        mean_ep_rw, mean_ep_crw = evaluate_once(
+            crt_step, policy_evaluation, test_env, opt.test_steps, log
+        )
 
-        total_rw = 0
-        nepisodes = 0
-        done = True
-        crt_return = 0
-        step = 0
-        while step < opt.test_steps or not done:
-            if done:
-                state, reward, done = test_env.reset(), 0, False
-                crt_return = 0
-            with torch.no_grad():
-                pi = policy_evaluation(state)
-            state, reward, done, _ = test_env.step(pi.action)
-
-            # do some logging
-            test_log.update(
-                ep_cnt=(1 if done else 0),
-                rw_per_ep=(reward, (1 if done else 0)),
-                step_per_ep=(1, (1 if done else 0)),
-                rw_per_step=reward,
-                max_q=pi.q_value,
-                test_fps=1,
-            )
-            crt_return += reward
-            step += 1
-
-            if done:
-                nepisodes += 1
-                total_rw += crt_return
-
-        log.log_info(test_log, f"Evaluation results.")
-        log.log(test_log, crt_step)
-        test_log.reset()
-
-        return total_rw / nepisodes
-
+        return mean_ep_rw, mean_ep_crw
 
     def run(opt):
         """ Here we initialize stuff.
@@ -331,7 +281,7 @@ if __name__ in ["__mp_main__", "__main__"]:
                     opt.mem_size, batch_size=32, async_memory=opt.async_memory
                 )
 
-        log = Logger(label="label", path=opt.out_dir)
+        log = init_eval_logger(opt.out_dir)
         train_log = log.add_group(
             tag="training",
             metrics=(
@@ -346,19 +296,10 @@ if __name__ in ["__mp_main__", "__main__"]:
             ),
             console_options=("white", "on_blue", ["bold"]),
         )
-        _test_log = log.add_group(
-            tag="testing",
-            metrics=(
-                log.SumMetric("ep_cnt"),
-                log.AvgMetric("rw_per_ep", emph=True),
-                log.AvgMetric("step_per_ep"),
-                log.AvgMetric("rw_per_step"),
-                log.MaxMetric("max_q"),
-                log.FPSMetric("test_fps"),
-            ),
-            console_options=("white", "on_magenta", ["bold"]),
+
+        log.log_info(
+            train_log, "date: %s." % time.strftime("%d/%m/%Y | %H:%M:%S")
         )
-        log.log_info(train_log, "date: %s." % time.strftime("%d/%m/%Y | %H:%M:%S"))
         log.log_info(train_log, "pytorch v%s." % torch.__version__)
 
         # Add the created objects in the opt namespace
@@ -388,7 +329,6 @@ if __name__ in ["__mp_main__", "__main__"]:
         # start the training
         train(opt)
 
-
     def main():
         """ Read config files and call experiment factories.
         """
@@ -402,7 +342,6 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         # run your experiment
         run(opt)
-
 
     if __name__ == "__main__":
 
