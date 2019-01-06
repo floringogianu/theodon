@@ -74,8 +74,8 @@ def learn(opt):
 
         sync_queue.put(1)
 
-        train_log.update(storage_fps=1)
-        train_log.update(training_fps=opt.update_freq)
+        train_log.update(storage_fps=opt.update_freq)
+        train_log.update(training_fps=1)
 
         if step % opt.learn_log_freq == 0:
             used_ram, used_gpu = get_process_memory()

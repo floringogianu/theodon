@@ -1,15 +1,12 @@
 """ Here are the functions for the async evaluator.
 """
 
-from rl_logger import Logger
-
 from wintermute.env_wrappers import get_wrapped_atari
 from wintermute.estimators import get_estimator
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
-from .common import evaluate_once, process_eval_results
-
+from .common import evaluate_once, process_eval_results, init_eval_logger
 
 def evaluate(opt):
     """ Here we wait for some other process to send us a state dict to eval it.
@@ -26,11 +23,11 @@ def evaluate(opt):
         step, state_dict = msg
         policy_evaluation.policy.estimator.load_state_dict(state_dict)
         policy_evaluation.policy.estimator.cuda()
-        mean_ep_rw = evaluate_once(
+        mean_ep_rw, mean_ep_crw = evaluate_once(
             step, policy_evaluation, env, opt.eval_steps, opt.log
         )
         best_rw = process_eval_results(
-            opt, (step, state_dict, mean_ep_rw), best_rw
+            opt, (step, state_dict, mean_ep_rw, mean_ep_crw), best_rw
         )
         confirm_queue.put(best_rw)
         msg = eval_queue.get()
@@ -41,21 +38,7 @@ def init_evaluator(opt, eval_queue, confirm_queue):
     """ Here we initialize the evaluator, creating objects and shit.
     """
 
-    log = Logger(label="label", path=opt.out_dir)
-    log.add_group(
-        tag="evaluation",
-        metrics=(
-            log.SumMetric("ep_cnt"),
-            log.AvgMetric("rw_per_ep", emph=True),
-            log.AvgMetric("step_per_ep"),
-            log.AvgMetric("rw_per_step"),
-            log.MaxMetric("max_q"),
-            log.FPSMetric("eval_fps"),
-            log.MaxMetric("ram"),
-            log.MaxMetric("gpu"),
-        ),
-        console_options=("white", "on_magenta", ["bold"]),
-    )
+    log = init_eval_logger(opt.out_dir)
 
     env = get_wrapped_atari(
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
