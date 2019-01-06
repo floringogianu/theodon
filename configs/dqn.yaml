@@ -5,6 +5,7 @@ seed: no  # randomize if 0 or no
 
 double: False
 prioritized: False
+shared_bias: False  # True for tuned DDQN / PER
 
 lr: 0.00025
 update_freq: 4
