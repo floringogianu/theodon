@@ -39,6 +39,7 @@ if __name__ == "__main__":
             hist_len=opt.hist_len,
             action_no=action_no,
             hidden_sz=opt.hidden_sz,
+            shared_bias=opt.shared_bias,
         )
         estimator = estimator.cuda()
         estimator.share_memory()
