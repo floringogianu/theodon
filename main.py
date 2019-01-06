@@ -197,10 +197,10 @@ if __name__ == "__main__":
             )
 
         opt.evals.append(mean_ep_rw)
-        opt.evals = opt.evals[-5:]
         summary = {
             "best": best_rw,
-            "last-5": np.mean(opt.evals),
+            "last-5": np.mean(opt.evals[-5:]),
+            "last-10": np.mean(opt.evals[-10:]),
             "step": test_step,
         }
         with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
