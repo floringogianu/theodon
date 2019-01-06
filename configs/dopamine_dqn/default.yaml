@@ -1,0 +1,29 @@
+game: road_runner
+no_gym: yes
+step_no: 25000000
+seed: no  # randomize if 0 or no
+
+double: no
+prioritized: no
+shared_bias: no
+
+lr: 0.00025
+update_freq: 4
+epsilon_steps: 250000  # != Nature
+epsilon_end: 0.01  # != Nature
+
+target_update: 8000  # != Nature
+learn_start: 20000  # != Nature
+
+mem_size: 1000000
+mem_device: cuda
+pinned_memory: no
+
+log_freq: 1000
+test_freq: 250000
+test_steps: 125000
+test_epsilon: 0.001  # != Nature
+
+async_eval: yes
+async_update: no
+async_memory: yes
