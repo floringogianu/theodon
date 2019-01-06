@@ -2,6 +2,7 @@
 """
 
 import torch
+
 if __name__ == "__main__":
     # pylint: disable=wrong-import-order
     torch.multiprocessing.set_start_method("spawn")
@@ -37,7 +38,6 @@ if __name__ == "__main__":
     from src.utils import create_paths
     from src.utils import get_process_memory
 
-
     def priority_update(mem, dqn_loss):
         """ Callback for updating priorities in the proportional-based experience
         replay and for computing the importance sampling corrected loss.
@@ -45,7 +45,6 @@ if __name__ == "__main__":
         losses = dqn_loss.loss
         mem.update([loss.item() for loss in losses.detach().abs()])
         return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
-
 
     def train(opt):
         """ Here we do the training.
@@ -128,7 +127,9 @@ if __name__ == "__main__":
                         mean_ep_rw = result.result()
                         new_test_results = test_step, test_estimator, mean_ep_rw
 
-                    _estimator = deepcopy(opt.policy_evaluation.policy.estimator)
+                    _estimator = deepcopy(
+                        opt.policy_evaluation.policy.estimator
+                    )
                     result = executor.submit(
                         test,
                         opt.test_opt,
@@ -168,7 +169,6 @@ if __name__ == "__main__":
         opt.log.log(train_log, step)
         train_log.reset()
 
-
     def process_test_results(opt, new_test_results, best_rw) -> float:
         """Here we process the results of a new evaluation.
 
@@ -198,13 +198,19 @@ if __name__ == "__main__":
 
         opt.evals.append(mean_ep_rw)
         opt.evals = opt.evals[-5:]
-        summary = {"best": best_rw, "last-5": np.mean(opt.evals), "step": test_step}
+        summary = {
+            "best": best_rw,
+            "last-5": np.mean(opt.evals),
+            "step": test_step,
+        }
         with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
             pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
 
         return best_rw
 
+
 if __name__ in ["__mp_main__", "__main__"]:
+
     def test(opt, crt_step, estimator, action_space, test_env, log):
         """ Here we do the training.
 
@@ -214,7 +220,9 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
         estimator.to("cuda")
-        policy_evaluation = EpsilonGreedyPolicy(estimator, action_space, epsilon)
+        policy_evaluation = EpsilonGreedyPolicy(
+            estimator, action_space, epsilon
+        )
 
         if test_env is None:
             test_env = get_wrapped_atari(
@@ -260,7 +268,6 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         return total_rw / nepisodes
 
-
     def run(opt):
         """ Here we initialize stuff.
         """
@@ -293,7 +300,11 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         # construct an epsilon greedy policy
         # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
-        epsilon = get_epsilon(steps=opt.epsilon_steps, end=opt.epsilon_end)
+        epsilon = get_epsilon(
+            steps=opt.epsilon_steps,
+            end=opt.epsilon_end,
+            warmup_steps=opt.learn_start,
+        )
         policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
 
         # construct a policy improvement type
@@ -358,7 +369,9 @@ if __name__ in ["__mp_main__", "__main__"]:
             ),
             console_options=("white", "on_magenta", ["bold"]),
         )
-        log.log_info(train_log, "date: %s." % time.strftime("%d/%m/%Y | %H:%M:%S"))
+        log.log_info(
+            train_log, "date: %s." % time.strftime("%d/%m/%Y | %H:%M:%S")
+        )
         log.log_info(train_log, "pytorch v%s." % torch.__version__)
 
         # Add the created objects in the opt namespace
@@ -388,7 +401,6 @@ if __name__ in ["__mp_main__", "__main__"]:
         # start the training
         train(opt)
 
-
     def main():
         """ Read config files and call experiment factories.
         """
@@ -402,7 +414,6 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         # run your experiment
         run(opt)
-
 
     if __name__ == "__main__":
 

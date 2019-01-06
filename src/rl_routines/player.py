@@ -125,7 +125,11 @@ def init_player(opt, experience_queue, sync_queue):
         device=torch.device("cuda"),
     )
 
-    epsilon = get_epsilon(steps=opt.epsilon_steps, end=opt.epsilon_end)
+    epsilon = get_epsilon(
+        steps=opt.epsilon_steps,
+        end=opt.epsilon_end,
+        warmup_steps=opt.learn_start,
+    )
     policy_evaluation = EpsilonGreedyPolicy(
         opt.estimator, env.action_space.n, epsilon
     )
