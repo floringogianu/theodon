@@ -49,6 +49,7 @@ def init_evaluator(opt, eval_queue, confirm_queue):
         hist_len=opt.hist_len,
         action_no=env.action_space.n,
         hidden_sz=opt.hidden_sz,
+        shared_bias=opt.shared_bias,
     )
     eval_estimator.cuda()
 

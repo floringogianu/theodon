@@ -237,13 +237,21 @@ if __name__ in ["__mp_main__", "__main__"]:
         # construct an estimator to be used with the policy
         action_no = env.action_space.n
         estimator = get_estimator(
-            "atari", hist_len=4, action_no=action_no, hidden_sz=512
+            "atari",
+            hist_len=4,
+            action_no=action_no,
+            hidden_sz=512,
+            shared_bias=opt.shared_bias,
         )
         estimator = estimator.cuda()
 
         # construct an epsilon greedy policy
         # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
-        epsilon = get_epsilon(steps=opt.epsilon_steps, end=opt.epsilon_end)
+        epsilon = get_epsilon(
+            steps=opt.epsilon_steps,
+            end=opt.epsilon_end,
+            warmup_steps=opt.learn_start,
+        )
         policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
 
         # construct a policy improvement type
@@ -300,6 +308,7 @@ if __name__ in ["__mp_main__", "__main__"]:
         log.log_info(
             train_log, "date: %s." % time.strftime("%d/%m/%Y | %H:%M:%S")
         )
+
         log.log_info(train_log, "pytorch v%s." % torch.__version__)
 
         # Add the created objects in the opt namespace
@@ -315,6 +324,7 @@ if __name__ in ["__mp_main__", "__main__"]:
         # print the opt
         print("Starting experiment using the following settings:")
         print(liftoff.config.config_to_string(opt))
+        print(estimator)
 
         opt.test_opt = Namespace(
             test_steps=opt.test_steps,
