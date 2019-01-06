@@ -294,7 +294,11 @@ if __name__ in ["__mp_main__", "__main__"]:
         # construct an estimator to be used with the policy
         action_no = env.action_space.n
         estimator = get_estimator(
-            "atari", hist_len=4, action_no=action_no, hidden_sz=512
+            "atari",
+            hist_len=4,
+            action_no=action_no,
+            hidden_sz=512,
+            shared_bias=opt.shared_bias,
         )
         estimator = estimator.cuda()
 
@@ -387,6 +391,7 @@ if __name__ in ["__mp_main__", "__main__"]:
         # print the opt
         print("Starting experiment using the following settings:")
         print(liftoff.config.config_to_string(opt))
+        print(estimator)
 
         opt.test_opt = Namespace(
             test_steps=opt.test_steps,
