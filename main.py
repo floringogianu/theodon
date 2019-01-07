@@ -16,6 +16,19 @@ if __name__ == "__main__":
 
     from torch import optim
 
+    from wintermute.estimators import get_estimator
+
+    # from wintermute.policy_improvement import get_optimizer
+    from wintermute.policy_improvement import DQNPolicyImprovement
+
+
+    import liftoff
+    from liftoff.config import read_config
+
+    from src.utils import create_paths  # TODO: change
+    from src.utils import get_process_memory
+    from src.rl_routines.common import priority_update
+
 from wintermute.env_wrappers import get_wrapped_atari
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
@@ -24,30 +37,10 @@ from src.rl_routines.common import (
     init_eval_logger,
     process_eval_results,
     evaluate_once,
+    create_memory
 )
 
 if __name__ == "__main__":
-    from wintermute.estimators import get_estimator
-
-    # from wintermute.policy_improvement import get_optimizer
-    from wintermute.policy_improvement import DQNPolicyImprovement
-    from wintermute.replay import MemoryEfficientExperienceReplay as ER
-    from wintermute.replay import PinnedExperienceReplay as PinnedER
-    from wintermute.replay.prioritized_replay import ProportionalSampler as PER
-
-    import liftoff
-    from liftoff.config import read_config
-
-    from src.utils import create_paths
-    from src.utils import get_process_memory
-
-    def priority_update(mem, dqn_loss):
-        """ Callback for updating priorities in the proportional-based experience
-        replay and for computing the importance sampling corrected loss.
-        """
-        losses = dqn_loss.loss
-        mem.update([loss.item() for loss in losses.detach().abs()])
-        return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
 
     def train(opt):
         """ Here we do the training.
@@ -82,8 +75,12 @@ if __name__ == "__main__":
 
             if do_training:
                 batch = opt.experience_replay.sample()
-                if opt.prioritized:
-                    opt.policy_improvement(batch, cb=opt.priority_update)
+                if opt.prioritized:  # batch is (data, idxs, weights)
+                    data, idxs, weights = batch
+                    update_priorities = partial(
+                        priority_update, opt.experience_replay, idxs, weights
+                    )
+                    opt.policy_improvement(data, cb=update_priorities)
                 else:
                     opt.policy_improvement(batch)
 
@@ -277,26 +274,8 @@ if __name__ in ["__mp_main__", "__main__"]:
         )
 
         # we also need an experience replay
-        if opt.prioritized:
-            experience_replay = PER(
-                opt.mem_size,
-                batch_size=32,
-                alpha=0.6,
-                optim_steps=((opt.step_no - opt.learn_start) / opt.update_freq),
-            )
-            priority_update_cb = partial(priority_update, experience_replay)
-        else:
-            if opt.pinned_memory:
-                experience_replay = PinnedER(
-                    opt.mem_size,
-                    batch_size=32,
-                    async_memory=opt.async_memory,
-                    device=opt.mem_device,
-                )
-            else:
-                experience_replay = ER(
-                    opt.mem_size, batch_size=32, async_memory=opt.async_memory
-                )
+
+        experience_replay = create_memory(opt)
 
         log = init_eval_logger(opt.out_dir)
         train_log = log.add_group(
@@ -327,8 +306,6 @@ if __name__ in ["__mp_main__", "__main__"]:
         opt.policy_improvement = policy_improvement
         opt.experience_replay = experience_replay
         opt.log = log
-        if opt.prioritized:
-            opt.priority_update = priority_update_cb
 
         # print the opt
         print("Starting experiment using the following settings:")

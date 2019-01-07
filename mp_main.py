@@ -28,9 +28,6 @@ if __name__ == "__main__":
         learn_opt = deepcopy(opt)
         eval_opt = deepcopy(opt)
 
-        if opt.prioritized:
-            learn_opt.priority_update_cb = opt.priority_update_cb
-
         action_no = get_wrapped_atari(
             opt.game, no_gym=opt.no_gym, seed=opt.seed
         ).action_space.n
