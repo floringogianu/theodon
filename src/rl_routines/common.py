@@ -131,10 +131,49 @@ def process_eval_results(opt, new_eval_results, best_rw) -> float:
     return best_rw
 
 
-def priority_update(mem, dqn_loss):
+def priority_update(mem, idxs, weights, dqn_loss):
     """ Callback for updating priorities in the proportional-based experience
     replay and for computing the importance sampling corrected loss.
     """
     losses = dqn_loss.loss
-    mem.update([loss.item() for loss in losses.detach().abs()])
-    return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
+    mem.update(idxs, [loss.item() for loss in losses.detach().abs()])
+    return (losses * weights.to(losses.device).view_as(losses)).mean()
+
+
+def create_memory(opt):
+    """ Initializes experience replay for
+    """
+    from wintermute.replay import MemoryEfficientExperienceReplay as ER
+    from wintermute.replay import PinnedExperienceReplay as PinnedER
+    from wintermute.replay.prioritized_replay import ProportionalSampler as PER
+
+    if opt.boot_no > 1:
+        bootstrap_args = (opt.boot_no, opt.boot_prob)
+    else:
+        bootstrap_args = None
+
+    _er_async = opt.async_memory and not opt.prioritized
+
+    if opt.pinned_memory:
+        experience_replay = PinnedER(
+            opt.mem_size,
+            batch_size=32,
+            async_memory=_er_async,
+            device=opt.mem_device,
+            bootstrap_args=bootstrap_args,
+        )
+    else:
+        experience_replay = ER(
+            opt.mem_size,
+            batch_size=32,
+            async_memory=_er_async,
+            bootstrap_args=bootstrap_args,
+        )
+    if opt.prioritized:
+        experience_replay = PER(
+            experience_replay,
+            opt.async_memory,
+            alpha=0.6,
+            optim_steps=((opt.step_no - opt.learn_start) / opt.update_freq),
+        )
+    return experience_replay
