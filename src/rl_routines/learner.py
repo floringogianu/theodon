@@ -23,47 +23,77 @@ def learn(opt):
     policy_improvement = opt.policy_improvement
     experience_replay = opt.experience_replay
     experience_queue = opt.experience_queue
-    confirm_until = opt.learn_start
     sync_queue = opt.sync_queue
-    step = 0
-    while True:
+    eval_queue = opt.eval_queue
+    confirm_queue = opt.confirm_queue
+
+    assert opt.learn_start % 100 == 0
+    assert opt.learn_start % opt.update_freq == 0
+    assert opt.step_no % opt.update_freq == 0
+    assert opt.target_update % opt.update_freq == 0
+
+    for step in range(1, opt.learn_start + 1):
         msg = experience_queue.get()
-        if isinstance(msg, str):
-            # print(msg, step)
-            if msg == "train":
-                batch = opt.experience_replay.sample()
-                if opt.prioritized:
-                    policy_improvement(batch, cb=opt.priority_update_cb)
-                else:
-                    policy_improvement(batch)
-                sync_queue.put(True)
-                train_log.update(training_fps=len(batch[0]))
-            elif msg == "update_target":
-                policy_improvement.update_target_estimator()
-                log.log_info(train_log, "Updated target network.")
-            elif msg == "done":
-                break
-        else:
+        experience_replay.push(msg)
+        train_log.update(storage_fps=1)
+        if step % 100 == 0:
+            sync_queue.put(1)
+    used_ram, used_gpu = get_process_memory()
+    train_log.update(ram=used_ram, gpu=used_gpu)
+    opt.log.log(train_log, step)
+    train_log.reset()
+
+    sync_queue.put(1)  # I'll start
+
+    last_state = None
+    step = opt.learn_start
+    while step < opt.step_no:
+        for _ in range(opt.update_freq - 1):
+            msg = experience_queue.get()
             experience_replay.push(msg)
-            train_log.update(storage_fps=1)
-            step += 1
+        msg = experience_queue.get()
+        batch = opt.experience_replay.push_and_sample(msg)
+        step += opt.update_freq
+        msg = experience_queue.get()
 
-            if step <= confirm_until and step % 100 == 0:
-                sync_queue.put(True)
+        if opt.prioritized:
+            policy_improvement(batch, cb=opt.priority_update_cb)
+        else:
+            policy_improvement(batch)
 
-            if step % opt.learn_log_freq == 0:
-                used_ram, used_gpu = get_process_memory()
-                train_log.update(ram=used_ram, gpu=used_gpu)
-                opt.log.log(train_log, step)
-                train_log.reset()
+        if step % opt.target_update == 0:
+            policy_improvement.update_target_estimator()
+
+        if step % opt.eval_freq == 0:
+            if last_state:
+                confirm_queue.get()
+            last_state = (  # TODO: is there a better way?
+                deepcopy(policy_improvement.estimator).cpu().state_dict()
+            )
+            eval_queue.put((step, last_state))
+
+        sync_queue.put(1)
+
+        train_log.update(storage_fps=opt.update_freq)
+        train_log.update(training_fps=1)
+
+        if step % opt.learn_log_freq == 0:
+            used_ram, used_gpu = get_process_memory()
+            train_log.update(ram=used_ram, gpu=used_gpu)
+            opt.log.log(train_log, step)
+            train_log.reset()
 
     used_ram, used_gpu = get_process_memory()
     train_log.update(ram=used_ram, gpu=used_gpu)
     opt.log.log(train_log, step)
     train_log.reset()
 
+    if last_state is not None:
+        confirm_queue.get()
+    eval_queue.put("done")
 
-def init_learner(opt, experience_queue, sync_queue):
+
+def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
     """ Function to serve as target for the learner process.
     """
     log = Logger(label="label", path=opt.out_dir)
@@ -77,9 +107,8 @@ def init_learner(opt, experience_queue, sync_queue):
         ),
         console_options=("white", "on_blue", ["bold"]),
     )
-
     estimator = opt.estimator
-    target_estimator = deepcopy(estimator)
+    target_estimator = None
 
     # construct a policy improvement type
     optimizer = optim.RMSprop(
@@ -111,8 +140,10 @@ def init_learner(opt, experience_queue, sync_queue):
     else:
         if opt.pinned_memory:
             experience_replay = PinnedER(
-                opt.mem_size, batch_size=32, async_memory=opt.async_memory,
-                device=opt.mem_device
+                opt.mem_size,
+                batch_size=32,
+                async_memory=opt.async_memory,
+                device=opt.mem_device,
             )
         else:
             experience_replay = ER(
@@ -124,5 +155,7 @@ def init_learner(opt, experience_queue, sync_queue):
     opt.experience_replay = experience_replay
     opt.experience_queue = experience_queue
     opt.sync_queue = sync_queue
+    opt.eval_queue = eval_queue
+    opt.confirm_queue = confirm_queue
 
     learn(opt)
