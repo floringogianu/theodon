@@ -109,16 +109,7 @@ if __name__ == "__main__":
 
             warmed_up = step > opt.learn_start
 
-<<<<<<< HEAD
-def priority_update(mem, losses):
-    """ Callback for updating priorities in the proportional-based experience
-    replay and for computing the importance sampling corrected loss.
-    """
-    mem.update([loss.item() for loss in losses.detach().abs()])
-    return (losses * mem.weights.to(losses.device).view_as(losses)).mean()
-=======
             # testing
->>>>>>> master
 
             if async_test_result is not None:
                 # pylint: disable=E0633
