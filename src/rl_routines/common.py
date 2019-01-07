@@ -147,7 +147,7 @@ def create_memory(opt):
     from wintermute.replay import PinnedExperienceReplay as PinnedER
     from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
-    if hastattr(opt, "boot_no") and opt.boot_no > 1:
+    if hasattr(opt, "boot_no") and opt.boot_no > 1:
         bootstrap_args = (opt.boot_no, opt.boot_prob)
     else:
         bootstrap_args = None
