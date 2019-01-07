@@ -5,6 +5,7 @@ seed: no  # randomize if 0 or no
 
 double: no
 prioritized: yes
+shared_bias: yes
 boot_no: 10
 boot_prob: .5
 
