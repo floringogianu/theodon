@@ -12,6 +12,7 @@ class BootstrappedEpsilonGreedyPolicy:
     pass
 
 
+
 class BootstrappedDQNPolicyImprovement(DQNPolicyImprovement):
     """ Manages the policy improvement step for bootstrapped estimators
         (ensembles). It has three behaviours:
@@ -51,11 +52,12 @@ class BootstrappedDQNPolicyImprovement(DQNPolicyImprovement):
         """ Overwrites the parent's methods.
         """
         batch_sz = batch[0].shape[0]
-        boot_mask = None
+        boot_masks = None
         batch = [el.to(self.device) for el in batch]
 
         if len(batch) == 6:
-            boot_mask = batch[-1]
+            # mask of size K * batch_size
+            boot_masks = batch[-1]
             batch = batch[:5]
 
         # scenario 1: sampled component, all data
@@ -70,31 +72,32 @@ class BootstrappedDQNPolicyImprovement(DQNPolicyImprovement):
             ).loss
 
         # scenario 2: all ensemble components, masked data
-        elif boot_mask is not None:
+        elif boot_masks is not None:
             # split batch in mini-batches for each ensemble component.
-            idxs = boot_mask.unique()
-            batches = [[el[boot_mask == idx] for el in batch] for idx in idxs]
+            batches = [[el[bm] for el in batch] for bm in boot_masks]
 
             # Gather the losses for each batch and ensemble component. We use
             # partial application to set which ensemble component gets trained.
             dqn_losses = [
                 get_dqn_loss(
                     batch_,
-                    partial(self.estimator, mid=idx),
+                    partial(self.estimator, mid=mid),
                     self.gamma,
-                    target_estimator=partial(self.target_estimator, mid=idx),
+                    target_estimator=partial(self.target_estimator, mid=mid),
                     is_double=self.is_double,
                 ).loss
-                for idx, batch_ in zip(idxs, batches)
+                for mid, batch_ in enumerate(batches)
             ]
 
             # recompose the dqn_loss
             dqn_loss = torch.zeros((batch_sz, 1), device=dqn_losses[0].device)
-            for idx, component_loss in zip(idxs, dqn_losses):
-                dqn_loss[boot_mask == idx] = component_loss
+            for boot_mask, loss in zip(dqn_losses, boot_masks):
+                dqn_loss[boot_mask] += loss
+
+            # TODO: gradient rescalling
 
         # scenario 3: all ensemble components, all data
-        elif boot_mask is None:
+        elif boot_masks is None:
             dqn_losses = [
                 get_dqn_loss(
                     batch,
