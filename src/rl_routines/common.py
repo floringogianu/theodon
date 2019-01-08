@@ -157,7 +157,7 @@ def create_memory(opt):
     if opt.pinned_memory:
         experience_replay = PinnedER(
             opt.mem_size,
-            batch_size=32,
+            batch_size=(opt.batch_size if hasattr(opt, "batch_size") else 32),
             async_memory=_er_async,
             device=opt.mem_device,
             bootstrap_args=bootstrap_args,
@@ -165,7 +165,7 @@ def create_memory(opt):
     else:
         experience_replay = ER(
             opt.mem_size,
-            batch_size=32,
+            batch_size=(opt.batch_size if hasattr(opt, "batch_size") else 32),
             async_memory=_er_async,
             bootstrap_args=bootstrap_args,
         )
