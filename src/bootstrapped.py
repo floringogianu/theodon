@@ -22,7 +22,7 @@ class DeterministicEnsembleOutput(NamedTuple):
     vote_cnt: object
 
 
-class BootstrappedPolicy:
+class BootstrappedPE:
     """ Implements the policy evaluation step for bootstrapped estimators
         (ensembles). It has two behaviours:
 
@@ -109,7 +109,7 @@ class BootstrappedPolicy:
         return self.__posterior_idx
 
 
-class BootstrappedDQNPolicyImprovement(DQNPolicyImprovement):
+class BootstrappedPI(DQNPolicyImprovement):
     """ Manages the policy improvement step for bootstrapped estimators
         (ensembles). It has three behaviours:
 
@@ -148,13 +148,12 @@ class BootstrappedDQNPolicyImprovement(DQNPolicyImprovement):
         """ Overwrites the parent's methods.
         """
         batch_sz = batch[0].shape[0]
-        boot_masks = None
         batch = [el.to(self.device) for el in batch]
 
-        if len(batch) == 6:
-            # mask of size K * batch_size
-            boot_masks = batch[-1]
-            batch = batch[:5]
+        boot_masks = None
+        if len(batch) == 2:
+            # usual (s,a,r,s_,d) batch, mask of size K * batch_size
+            batch, boot_masks = batch
 
         # scenario 1: sampled component, all data
         if self.__is_thompson:
@@ -234,9 +233,9 @@ if __name__ == "__main__":
     x = torch.randint(0, 255, (1, 4, 84, 84), dtype=torch.uint8)
 
     policies = [
-        ("thompson", BootstrappedPolicy(ens, is_thompson=True, vote=False)),
-        ("mean    ", BootstrappedPolicy(ens, is_thompson=False, vote=False)),
-        ("vote    ", BootstrappedPolicy(ens, is_thompson=False, vote=True)),
+        ("thompson", BootstrappedPE(ens, is_thompson=True, vote=False)),
+        ("mean    ", BootstrappedPE(ens, is_thompson=False, vote=False)),
+        ("vote    ", BootstrappedPE(ens, is_thompson=False, vote=True)),
     ]
 
     policies[0][1].sample_posterior_idx()
