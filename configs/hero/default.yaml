@@ -23,6 +23,7 @@ learn_log_freq: 50000
 eval_freq: 250000
 eval_steps: 125000
 eval_epsilon: 0.01  # table 5 in PER
+async_eval: yes
 
 async_memory: yes
 mem_device: cuda
