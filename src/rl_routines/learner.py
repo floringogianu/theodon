@@ -117,7 +117,7 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
         lr=opt.lr,
         momentum=0.0,
         alpha=0.95,
-        eps=0.00001,
+        eps=(opt.rmsprop_eps if hasattr(opt, "rmsprop_eps") else 0.00001),
         centered=True,
     )
     policy_improvement = DQNPolicyImprovement(
