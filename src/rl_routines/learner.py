@@ -6,12 +6,9 @@ from torch import optim
 from rl_logger import Logger
 
 from wintermute.policy_improvement import DQNPolicyImprovement
-from wintermute.replay import MemoryEfficientExperienceReplay as ER
-from wintermute.replay import PinnedExperienceReplay as PinnedER
-from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
 from src.utils import get_process_memory
-from .common import priority_update
+from .common import priority_update, create_memory
 
 
 def learn(opt):
@@ -56,10 +53,14 @@ def learn(opt):
         step += opt.update_freq
         msg = experience_queue.get()
 
-        if opt.prioritized:
-            policy_improvement(batch, cb=opt.priority_update_cb)
+        if opt.prioritized:  # batch is (data, idxs, weights)
+            data, idxs, weights = batch
+            update_priorities = partial(
+                priority_update, opt.experience_replay, idxs, weights
+            )
+            opt.policy_improvement(data, cb=update_priorities)
         else:
-            policy_improvement(batch)
+            opt.policy_improvement(batch)
 
         if step % opt.target_update == 0:
             policy_improvement.update_target_estimator()
@@ -116,7 +117,7 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
         lr=opt.lr,
         momentum=0.0,
         alpha=0.95,
-        eps=0.00001,
+        eps=(opt.rmsprop_eps if hasattr(opt, "rmsprop_eps") else 0.00001),
         centered=True,
     )
     policy_improvement = DQNPolicyImprovement(
@@ -128,27 +129,7 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
     )
 
     # we also need an experience replay
-    if opt.prioritized:
-        experience_replay = PER(
-            opt.mem_size,
-            batch_size=32,
-            alpha=0.6,
-            optim_steps=((opt.step_no - opt.learn_start) / opt.update_freq),
-        )
-        priority_update_cb = partial(priority_update, experience_replay)
-        opt.priority_update_cb = priority_update_cb
-    else:
-        if opt.pinned_memory:
-            experience_replay = PinnedER(
-                opt.mem_size,
-                batch_size=32,
-                async_memory=opt.async_memory,
-                device=opt.mem_device,
-            )
-        else:
-            experience_replay = ER(
-                opt.mem_size, batch_size=32, async_memory=opt.async_memory
-            )
+    experience_replay = create_memory(opt)
 
     opt.log = log
     opt.policy_improvement = policy_improvement
