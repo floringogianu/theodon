@@ -1,0 +1,29 @@
+game: alien
+no_gym: yes
+step_no: 50000000
+seed: no  # randomize if 0 or no
+
+double: yes
+prioritized: yes
+shared_bias: yes  # Tuned DDQN
+
+lr: 0.00025
+rmsprop_eps: 0.01
+update_freq: 4
+epsilon_steps: 1000000
+epsilon_end: 0.01  # Tuned DDQN
+target_update: 30000  # Tuned DDQN
+hist_len: 4
+hidden_sz: 512
+learn_start: 50000
+mem_size: 1000000
+log_freq: 1000
+learn_log_freq: 50000
+
+eval_freq: 250000
+eval_steps: 125000
+eval_epsilon: 0.01  # table 5 in PER
+
+async_memory: yes
+mem_device: cuda
+pinned_memory: no

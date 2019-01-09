@@ -1,0 +1,12 @@
+prioritized:
+  - yes
+  - no
+
+lr:
+  - 0.00025
+  - 0.0000625  # In PER
+
+filter_out:
+  - left: prioritized
+    right: lr
+    exclude: [[True, 0.00025], [False, 0.0000625]]
