@@ -49,8 +49,8 @@ if __name__ == "__main__":
         train_log = opt.log.groups["training"]
         train_log.reset()
 
-        async_test_result = None  # type: Optional[tuple]
-        new_test_results = None  # type: Tuple[int, nn.Module, float]
+        async_eval_result = None  # type: Optional[tuple]
+        new_eval_results = None  # type: Tuple[int, nn.Module, float]
 
         action_space = opt.policy_evaluation.action_space
         if opt.async_eval:
@@ -111,27 +111,27 @@ if __name__ == "__main__":
 
             # testing
 
-            if async_test_result is not None:
+            if async_eval_result is not None:
                 # pylint: disable=E0633
-                test_step, test_estimator, result = async_test_result
+                eval_step, eval_estimator, result = async_eval_result
                 if result.done():
                     avgs = result.result()
-                    new_test_results = (
-                        test_step,
-                        test_estimator.state_dict(),
+                    new_eval_results = (
+                        eval_step,
+                        eval_estimator.state_dict(),
                         *avgs,
                     )
-                    async_test_result = None
+                    async_eval_result = None
 
-            if step % opt.test_freq == 0:
+            if step % opt.eval_freq == 0:
                 if opt.async_eval:
-                    if async_test_result is not None:
+                    if async_eval_result is not None:
                         # Wait for the previous evaluation to end
-                        test_step, test_estimator, result = async_test_result
+                        eval_step, eval_estimator, result = async_eval_result
                         avgs = result.result()
-                        new_test_results = (
-                            test_step,
-                            test_estimator.state_dict(),
+                        new_eval_results = (
+                            eval_step,
+                            eval_estimator.state_dict(),
                             *avgs,
                         )
 
@@ -140,43 +140,43 @@ if __name__ == "__main__":
                     )
                     result = executor.submit(
                         test,
-                        opt.test_opt,
+                        opt.eval_opt,
                         step,
                         _estimator,
                         action_space,
-                        None,  # do not pickle test_env if evaluation is async
+                        None,  # do not pickle eval_env if evaluation is async
                         opt.log,
                     )
-                    async_test_result = (step, _estimator, result)
+                    async_eval_result = (step, _estimator, result)
                 else:
-                    test_estimator = deepcopy(
+                    eval_estimator = deepcopy(
                         opt.policy_evaluation.policy.estimator
                     )
-                    test_step = step
+                    eval_step = step
                     avgs = test(
-                        opt.test_opt,
+                        opt.eval_opt,
                         step,
-                        test_estimator,
+                        eval_estimator,
                         action_space,
-                        opt.test_env,
+                        opt.eval_env,
                         opt.log,
                     )
-                    new_test_results = (
-                        test_step,
-                        test_estimator.state_dict(),
+                    new_eval_results = (
+                        eval_step,
+                        eval_estimator.state_dict(),
                         *avgs,
                     )
 
-            if new_test_results is not None:
-                best_rw = process_eval_results(opt, new_test_results, best_rw)
-                new_test_results = None
+            if new_eval_results is not None:
+                best_rw = process_eval_results(opt, new_eval_results, best_rw)
+                new_eval_results = None
 
-        if async_test_result is not None:
+        if async_eval_result is not None:
             # pylint: disable=E0633
-            test_step, test_estimator, result = async_test_result
+            eval_step, eval_estimator, result = async_eval_result
             avgs = result.result()
-            new_test_results = (test_step, test_estimator.state_dict(), *avgs)
-            best_rw = process_eval_results(opt, new_test_results, best_rw)
+            new_eval_results = (eval_step, eval_estimator.state_dict(), *avgs)
+            best_rw = process_eval_results(opt, new_eval_results, best_rw)
 
         opt.log.log(train_log, step)
         train_log.reset()
@@ -184,26 +184,26 @@ if __name__ == "__main__":
 
 if __name__ in ["__mp_main__", "__main__"]:
 
-    def test(opt, crt_step, estimator, action_space, test_env, log):
+    def test(opt, crt_step, estimator, action_space, eval_env, log):
         """ Here we do the training.
 
             DeepMind uses a constant epsilon schedule with a very small value
             instead  of a completely Deterministic Policy.
         """
 
-        epsilon = get_epsilon(name="constant", start=opt.test_epsilon)
+        epsilon = get_epsilon(name="constant", start=opt.eval_epsilon)
         estimator.to("cuda")
         policy_evaluation = EpsilonGreedyPolicy(
             estimator, action_space, epsilon
         )
 
-        if test_env is None:
-            test_env = get_wrapped_atari(
+        if eval_env is None:
+            eval_env = get_wrapped_atari(
                 opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
             )
 
         mean_ep_rw, mean_ep_crw = evaluate_once(
-            crt_step, policy_evaluation, test_env, opt.test_steps, log
+            crt_step, policy_evaluation, eval_env, opt.eval_steps, log
         )
 
         return mean_ep_rw, mean_ep_crw
@@ -225,9 +225,9 @@ if __name__ in ["__mp_main__", "__main__"]:
         )
 
         if opt.async_eval:
-            test_env = None
+            eval_env = None
         else:
-            test_env = get_wrapped_atari(
+            eval_env = get_wrapped_atari(
                 opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
             )
 
@@ -292,7 +292,7 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         # Add the created objects in the opt namespace
         opt.env = env
-        opt.test_env = test_env
+        opt.eval_env = eval_env
         opt.policy_evaluation = policy_evaluation
         opt.policy_improvement = policy_improvement
         opt.experience_replay = experience_replay
@@ -303,9 +303,9 @@ if __name__ in ["__mp_main__", "__main__"]:
         print(liftoff.config.config_to_string(opt))
         print(estimator)
 
-        opt.test_opt = Namespace(
-            test_steps=opt.test_steps,
-            test_epsilon=opt.test_epsilon,
+        opt.eval_opt = Namespace(
+            eval_steps=opt.eval_steps,
+            eval_epsilon=opt.eval_epsilon,
             game=opt.game,
             seed=opt.seed,
             no_gym=opt.no_gym,
