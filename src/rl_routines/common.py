@@ -174,6 +174,7 @@ def create_memory(opt):
             experience_replay,
             opt.async_memory,
             alpha=0.6,
+            beta=0.4,
             optim_steps=((opt.step_no - opt.learn_start) / opt.update_freq),
         )
     return experience_replay
