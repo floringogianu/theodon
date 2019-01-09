@@ -14,30 +14,25 @@ if __name__ == "__main__":
     from argparse import Namespace
     import concurrent.futures
 
-    from torch import optim
-
     from wintermute.estimators import get_estimator
-
-    # from wintermute.policy_improvement import get_optimizer
-    from wintermute.policy_improvement import DQNPolicyImprovement
-
-
+    from wintermute.estimators import BootstrappedAtariNet
     import liftoff
     from liftoff.config import read_config
 
     from src.utils import create_paths  # TODO: change
     from src.utils import get_process_memory
-    from src.rl_routines.common import priority_update
 
 from wintermute.env_wrappers import get_wrapped_atari
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
+from src.bootstrapped import BootstrappedPE
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
 from src.rl_routines.common import (
     init_eval_logger,
     process_eval_results,
     evaluate_once,
-    create_memory
+    create_memory,
+    get_dqn_routines,
 )
 
 if __name__ == "__main__":
@@ -55,6 +50,10 @@ if __name__ == "__main__":
         action_space = opt.policy_evaluation.action_space
         if opt.async_eval:
             executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
+
+        thompson_sampling = False
+        if hasattr(opt, "boot"):
+            thompson_sampling = opt.boot.is_thompson
 
         state, reward, done = env.reset(), 0, False
         warmed_up = False
@@ -78,7 +77,7 @@ if __name__ == "__main__":
                 if opt.prioritized:  # batch is (data, idxs, weights)
                     data, idxs, weights = batch
                     update_priorities = partial(
-                        priority_update, opt.experience_replay, idxs, weights
+                        opt.cb, opt.experience_replay, idxs, weights
                     )
                     opt.policy_improvement(data, cb=update_priorities)
                 else:
@@ -100,6 +99,9 @@ if __name__ == "__main__":
             if done:
                 state, reward, done = env.reset(), 0, False
                 ep_cnt += 1
+                if thompson_sampling:
+                    ts_idx = opt.policy_evaluation.policy.sample_posterior_idx()
+                    opt.policy_improvement.set_posterior_idx(ts_idx)
 
                 if ep_cnt % opt.log_freq == 0:
                     used_ram, used_gpu = get_process_memory()
@@ -193,9 +195,23 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         epsilon = get_epsilon(name="constant", start=opt.eval_epsilon)
         estimator.to("cuda")
-        policy_evaluation = EpsilonGreedyPolicy(
-            estimator, action_space, epsilon
-        )
+
+        if hasattr(opt, "boot"):
+            policy_evaluation = EpsilonGreedyPolicy(
+                estimator,
+                action_space,
+                epsilon,
+                policy=BootstrappedPE(
+                    estimator,
+                    is_thompson=opt.boot.is_thompson,
+                    vote=opt.boot.vote,
+                    test=True
+                ),
+            )
+        else:
+            policy_evaluation = EpsilonGreedyPolicy(
+                estimator, action_space, epsilon
+            )
 
         if eval_env is None:
             eval_env = get_wrapped_atari(
@@ -237,36 +253,22 @@ if __name__ in ["__mp_main__", "__main__"]:
             "atari",
             hist_len=4,
             action_no=action_no,
-            hidden_sz=512,
+            hidden_sz=opt.linear_size,
             shared_bias=opt.shared_bias,
         )
+        if hasattr(opt, "boot"):
+            estimator = BootstrappedAtariNet(
+                estimator, boot_no=opt.boot.k, full=False
+            )
         estimator = estimator.cuda()
 
-        # construct an epsilon greedy policy
-        # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
-        epsilon = get_epsilon(
-            steps=opt.epsilon_steps,
-            end=opt.epsilon_end,
-            warmup_steps=opt.learn_start,
-        )
-        policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
-
-        # construct a policy improvement type
-        optimizer = optim.RMSprop(
-            estimator.parameters(),
-            lr=opt.lr,
-            momentum=0.0,
-            alpha=0.95,
-            eps=0.00001,
-            centered=True,
-        )
-        policy_improvement = DQNPolicyImprovement(
-            estimator, optimizer, gamma=0.99, is_double=opt.double
+        # construct DQN/BootstrappedDQN Policy Evaluation and Improvement
+        policy_evaluation, policy_improvement = get_dqn_routines(
+            opt, estimator, action_no
         )
 
-        # we also need an experience replay
-
-        experience_replay = create_memory(opt)
+        # Get Experience Replay and a callback function for updating priorities
+        experience_replay, update_priorities = create_memory(opt)
 
         log = init_eval_logger(opt.out_dir)
         train_log = log.add_group(
@@ -296,6 +298,7 @@ if __name__ in ["__mp_main__", "__main__"]:
         opt.policy_evaluation = policy_evaluation
         opt.policy_improvement = policy_improvement
         opt.experience_replay = experience_replay
+        opt.update_priorities = update_priorities
         opt.log = log
 
         # print the opt
@@ -309,6 +312,7 @@ if __name__ in ["__mp_main__", "__main__"]:
             game=opt.game,
             seed=opt.seed,
             no_gym=opt.no_gym,
+            boot=opt.boot if hasattr(opt, "boot") else None,
         )
 
         opt.evals = []
@@ -331,5 +335,4 @@ if __name__ in ["__mp_main__", "__main__"]:
         run(opt)
 
     if __name__ == "__main__":
-
         main()

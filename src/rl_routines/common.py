@@ -4,9 +4,18 @@
 from typing import Tuple
 import pickle
 import numpy as np
+
 import torch
+from torch import optim
+
+from wintermute.policy_improvement import DQNPolicyImprovement
+from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
+from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from rl_logger import Logger
+
 from src.utils import get_process_memory
+from src.bootstrapped import BootstrappedPE
+from src.bootstrapped import BootstrappedPI
 
 
 def init_eval_logger(out_dir=None, log: Logger = None):
@@ -136,7 +145,8 @@ def priority_update(mem, idxs, weights, dqn_loss):
     replay and for computing the importance sampling corrected loss.
     """
     losses = dqn_loss.loss
-    mem.update(idxs, [loss.item() for loss in losses.detach().abs()])
+    priorities = dqn_loss.priorities.detach().abs()
+    mem.update(idxs, [priority.item() for priority in priorities])
     return (losses * weights.to(losses.device).view_as(losses)).mean()
 
 
@@ -147,12 +157,15 @@ def create_memory(opt):
     from wintermute.replay import PinnedExperienceReplay as PinnedER
     from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
-    if hasattr(opt, "boot_no") and opt.boot_no > 1:
-        bootstrap_args = (opt.boot_no, opt.boot_prob)
-    else:
-        bootstrap_args = None
+    bootstrap_args = None
+    if hasattr(opt, "boot"):
+        # if boot_prob is 1 then there is no mask
+        if opt.boot.prob < 1:
+            # set the ensemble size and bootstrapp mask probability
+            bootstrap_args = (opt.boot.k, opt.boot.prob)
 
     _er_async = opt.async_memory and not opt.prioritized
+    cb = None
 
     if opt.pinned_memory:
         experience_replay = PinnedER(
@@ -177,4 +190,65 @@ def create_memory(opt):
             beta=0.4,
             optim_steps=((opt.step_no - opt.learn_start) / opt.update_freq),
         )
-    return experience_replay
+        cb = priority_update
+
+    return experience_replay, cb
+
+
+def get_dqn_routines(opt, estimator, action_no):
+    """ Constructs and returns the DQN routines used in training.
+
+    Args:
+        opt (Namespace): Settings.
+        estimator (nn.Module): An estimator to be used for policy evaluation
+            and to be optimized during policy improvement.
+       action_no (int): No of actions.
+
+    Returns:
+        [type]: [description]
+    """
+
+    # construct an epsilon greedy policy
+    # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
+    epsilon = get_epsilon(
+        steps=opt.epsilon_steps,
+        end=opt.epsilon_end,
+        warmup_steps=opt.learn_start,
+    )
+
+    # construct a policy improvement type
+    optimizer = optim.RMSprop(
+        estimator.parameters(),
+        lr=opt.lr,
+        momentum=0.0,
+        alpha=0.95,
+        eps=0.00001,
+        centered=True,
+    )
+    # construct policy evaluation and policy improvement objects
+    if opt.boot is not None:
+        # for bootstrapping/ensemble methods
+        policy_evaluation = EpsilonGreedyPolicy(
+            estimator,
+            action_no,
+            epsilon,
+            policy=BootstrappedPE(
+                estimator, is_thompson=opt.boot.is_thompson, vote=opt.boot.vote
+            ),
+        )
+        policy_improvement = BootstrappedPI(
+            estimator,
+            optimizer,
+            gamma=0.99,
+            is_double=opt.double,
+            is_thompson=opt.boot.is_thompson,
+            boot_mask=opt.boot.prob < 1,
+        )
+    else:
+        # for all the othe we use classic DQN/DQN objects
+        policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
+        policy_improvement = DQNPolicyImprovement(
+            estimator, optimizer, gamma=0.99, is_double=opt.double
+        )
+
+    return policy_evaluation, policy_improvement

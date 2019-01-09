@@ -6,9 +6,10 @@ from typing import NamedTuple
 
 import torch
 from gym.spaces import Discrete
+from termcolor import colored as clr
 
 from wintermute.policy_improvement import DQNPolicyImprovement, get_dqn_loss
-from wintermute.policy_evaluation.exploration_schedules import get_schedule
+from wintermute.policy_improvement import DQNLoss
 
 
 class DeterministicEnsembleOutput(NamedTuple):
@@ -38,25 +39,42 @@ class BootstrappedPE:
             components (`vote`==True).
     """
 
-    def __init__(self, estimator, is_thompson=False, vote=True):
+    def __init__(self, estimator, is_thompson=False, vote=True, test=False):
         self.__estimator = estimator
         self.__posterior_idx = None
         self.__vote = vote
         self.__ensemble_sz = len(self.__estimator)
+        params = estimator.parameters()
+        try:
+            self.__device = next(params).device
+        except TypeError:
+            self.__device = next(params[0]["params"]).device
 
-        # TODO: check this for batch inputs also
+        cls_name = f"{self.__class__.__name__}"
         if is_thompson:
             self.get_action = self.__thompson_action
+            print(clr(f"{cls_name} with Thompson Sampling.", "green"))
         elif vote:
+            print(clr(f"{cls_name} with Voting Ensemble.", "green"))
             self.get_action = self.__voting_action
         else:
+            print(clr(f"{cls_name} with Plain Ensemble.", "green"))
             self.get_action = self.__mean_action
+
+        if test:
+            if vote:
+                print(clr(f"{cls_name} with Voting Ensemble.", "magenta"))
+                self.get_action = self.__voting_action
+            else:
+                print(clr(f"{cls_name} with Plain Ensemble.", "green"))
+                self.get_action = self.__mean_action
 
     def __thompson_action(self, state):
         assert (
             self.__posterior_idx is not None
         ), "Call `sample_posterior_idx` first."
 
+        state = state.to(self.__device)
         ensemble_qvals = self.__estimator(state).squeeze()
         qvals = ensemble_qvals[self.__posterior_idx]
         qval, argmax_a = qvals.max(0)
@@ -71,6 +89,7 @@ class BootstrappedPE:
         )
 
     def __mean_action(self, state):
+        state = state.to(self.__device)
         ensemble_qvals = self.__estimator(state).squeeze()
         qvals = ensemble_qvals.mean(0)
         qval, argmax_a = qvals.max(0)
@@ -85,6 +104,7 @@ class BootstrappedPE:
         )
 
     def __voting_action(self, state):
+        state = state.to(self.__device)
         ensemble_qvals = self.__estimator(state).squeeze()
         act_no = ensemble_qvals.shape[1]
 
@@ -107,6 +127,10 @@ class BootstrappedPE:
         """
         self.__posterior_idx = torch.randint(0, self.__ensemble_sz, (1,)).item()
         return self.__posterior_idx
+
+    @property
+    def estimator(self):
+        return self.__estimator
 
 
 class BootstrappedPI(DQNPolicyImprovement):
@@ -137,6 +161,7 @@ class BootstrappedPI(DQNPolicyImprovement):
         target_estimator=None,
         is_double=False,
         is_thompson=False,
+        boot_mask=True,
     ):
         super().__init__(
             estimator, optimizer, gamma, target_estimator, is_double
@@ -144,73 +169,32 @@ class BootstrappedPI(DQNPolicyImprovement):
         self.__is_thompson = is_thompson
         self.__posterior_idx = None
 
+        assert (
+            boot_mask != is_thompson
+        ), "Can't have both masks and Thompson Sampling, yet."
+
+        cls_name = f"{self.__class__.__name__}"
+        if self.__is_thompson:
+            self.__get_dqn_loss = self.__thompson_update
+            print(clr(f"{cls_name} with Thompson Sampling.", "green"))
+        elif boot_mask:
+            self.__get_dqn_loss = self.__bootstrapp_update
+            print(clr(f"{cls_name} with Data Bootstrapping.", "green"))
+        elif not boot_mask:
+            self.__get_dqn_loss = self.__ensemble_update
+            print(clr(f"{cls_name} with Plain Ensembles.", "green"))
+        else:
+            raise NotImplementedError("Not sure what to do...")
+
     def __call__(self, batch, cb=None):
         """ Overwrites the parent's methods.
         """
-        batch_sz = batch[0].shape[0]
-        batch = [el.to(self.device) for el in batch]
-
-        boot_masks = None
-        if len(batch) == 2:
-            # usual (s,a,r,s_,d) batch, mask of size K * batch_size
-            batch, boot_masks = batch
-
-        # scenario 1: sampled component, all data
-        if self.__is_thompson:
-            idx = self.__posterior_idx
-            dqn_loss = get_dqn_loss(
-                batch,
-                partial(self.estimator, mid=idx),
-                self.gamma,
-                target_estimator=partial(self.target_estimator, mid=idx),
-                is_double=self.is_double,
-            ).loss
-
-        # scenario 2: all ensemble components, masked data
-        elif boot_masks is not None:
-            # split batch in mini-batches for each ensemble component.
-            batches = [[el[bm] for el in batch] for bm in boot_masks]
-
-            # Gather the losses for each batch and ensemble component. We use
-            # partial application to set which ensemble component gets trained.
-            dqn_losses = [
-                get_dqn_loss(
-                    batch_,
-                    partial(self.estimator, mid=mid),
-                    self.gamma,
-                    target_estimator=partial(self.target_estimator, mid=mid),
-                    is_double=self.is_double,
-                ).loss
-                for mid, batch_ in enumerate(batches)
-            ]
-
-            # recompose the dqn_loss
-            dqn_loss = torch.zeros((batch_sz, 1), device=dqn_losses[0].device)
-            for boot_mask, loss in zip(dqn_losses, boot_masks):
-                dqn_loss[boot_mask] += loss
-
-            # TODO: gradient rescalling
-
-        # scenario 3: all ensemble components, all data
-        elif boot_masks is None:
-            dqn_losses = [
-                get_dqn_loss(
-                    batch,
-                    partial(self.estimator, mid=idx),
-                    self.gamma,
-                    target_estimator=partial(self.target_estimator, mid=idx),
-                    is_double=self.is_double,
-                ).loss
-                for idx in range(len(self.estimator))
-            ]
-
-            # Mean of the losses of each ensemble component on the full batch
-            dqn_loss = torch.cat(dqn_losses, dim=1).mean(dim=1).unsqueeze(1)
+        dqn_loss = self.__get_dqn_loss(batch)
 
         if cb:
             loss = cb(dqn_loss)
         else:
-            loss = dqn_loss.mean()
+            loss = dqn_loss.loss.mean()
 
         loss.backward()
         self.update_estimator()
@@ -222,6 +206,100 @@ class BootstrappedPI(DQNPolicyImprovement):
             + "constructor."
         )
         self.__posterior_idx = idx
+
+    def get_uncertainty(self, x, actions, cached_features=True):
+        # TODO: finish this
+        with torch.no_grad():
+            ensemble_qvals = self.estimator(x, cached_features)
+
+    def __thompson_update(self, batch):
+        # scenario 1: sampled component, all data
+        batch = [el.to(self.device) for el in batch]
+        idx = self.__posterior_idx
+        loss = get_dqn_loss(
+            batch,
+            partial(self.estimator, mid=idx),
+            self.gamma,
+            target_estimator=partial(self.target_estimator, mid=idx),
+            is_double=self.is_double,
+        )
+
+        # TODO: add priorities
+
+        return DQNLoss(
+            loss=loss.loss, priority=None, q_values=None, q_targets=None
+        )
+
+    def __bootstrapp_update(self, batch):
+        # scenario 2: all ensemble components, masked data
+        batch, boot_masks = batch
+        batch_sz = batch[0].shape[0]
+
+        batch = [el.to(self.device) for el in batch]
+        boot_masks.to(self.device)
+
+        # pass through the feature extractor and replace states
+        # with features. Also pass next_states once more if Double-DQN.
+        if self.estimator.feature_extractor is not None:
+            online = self.estimator.get_features
+            target = self.target_estimator.get_features
+            batch[0] = online(batch[0]).view(batch_sz, -1)
+            if self.is_double:
+                with torch.no_grad():
+                    features_ = online(batch[3]).view(batch_sz, -1)
+            batch[3] = target(batch[3]).view(batch_sz, -1)
+
+        # split batch in mini-batches for each ensemble component.
+        batches = [[el[bm] for el in batch] for bm in boot_masks]
+
+        # Gather the losses for each batch and ensemble component. We use
+        # partial application to set which ensemble component gets trained.
+        dqn_losses = [
+            get_dqn_loss(
+                batch_,
+                partial(self.estimator, mid=mid, cached_features=True),
+                self.gamma,
+                target_estimator=partial(
+                    self.target_estimator, mid=mid, cached_features=True
+                ),
+                is_double=self.is_double,
+                next_states_features=features_ if self.is_double else None,
+            ).loss
+            for mid, batch_ in enumerate(batches)
+        ]
+
+        # sum up the losses of a given transition across ensemble components
+        dqn_loss = torch.zeros((batch_sz, 1), device=dqn_losses[0].device)
+        for loss, boot_mask in zip(dqn_losses, boot_masks):
+            dqn_loss[boot_mask] += loss
+
+        # TODO: gradient rescalling!!!
+        # TODO: add priorities
+
+        return DQNLoss(
+            loss=dqn_loss, priority=None, q_values=None, q_targets=None
+        )
+
+    def __ensemble_update(self, batch):
+        # scenario 3: all ensemble components, all data
+        batch = [el.to(self.device) for el in batch]
+        dqn_losses = [
+            get_dqn_loss(
+                batch,
+                partial(self.estimator, mid=idx),
+                self.gamma,
+                target_estimator=partial(self.target_estimator, mid=idx),
+                is_double=self.is_double,
+            ).loss
+            for idx in range(len(self.estimator))
+        ]
+
+        # Mean of the losses of each ensemble component on the full batch
+        loss = torch.cat(dqn_losses, dim=1).mean(dim=1).unsqueeze(1)
+
+        # TODO: add priorities
+
+        return DQNLoss(loss=loss, priority=None, q_values=None, q_targets=None)
 
 
 if __name__ == "__main__":

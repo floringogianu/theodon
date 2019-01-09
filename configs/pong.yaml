@@ -1,9 +1,9 @@
-game: space_invaders
+game: pong
 no_gym: yes
-step_no: 50000000
+step_no: 4000000
 seed: no  # randomize if 0 or no
 
-double: no
+double: yes
 prioritized: no
 shared_bias: yes
 
@@ -14,26 +14,26 @@ shared_bias: yes
 # - vote decides if you evaluate the policy by voting or by mean. You can also
 #   evaluate by voting at test time when doing thomspon sampling if vote == yes
 boot:
-  k: 10
+  k: 3
   prob: 1  # no mask if boot_prob == 1
-  is_thompson: no
+  is_thompson: yes
   vote: yes
 
-linear_size: 512
+linear_size: 128
 
-lr: 0.00025
-update_freq: 4
-epsilon_steps: 1000000
-epsilon_end: 0.1
-target_update: 10000
+lr: 0.0001
+update_freq: 2
+epsilon_steps: 30000
+epsilon_end: 0.01
+target_update: 1000
 
-learn_start: 3000
-mem_size: 1000000
+learn_start: 10000
+mem_size: 100000
 log_freq: 10
 
-eval_freq: 10000
-eval_steps: 2000
-eval_epsilon: 0.05
+eval_freq: 100000
+eval_steps: 50000
+eval_epsilon: 0.01
 
 async_eval: yes
 async_memory: yes
