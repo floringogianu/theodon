@@ -50,6 +50,9 @@ class BootstrappedPE:
         except TypeError:
             self.__device = next(params[0]["params"]).device
 
+        # TODO: Most likely this policy evaluation step is not woring
+        # with batches. Need to test.
+
         cls_name = f"{self.__class__.__name__}"
         if is_thompson:
             self.get_action = self.__thompson_action
@@ -208,9 +211,22 @@ class BootstrappedPI(DQNPolicyImprovement):
         self.__posterior_idx = idx
 
     def get_uncertainty(self, x, actions, cached_features=True):
-        # TODO: finish this
+        """ Returns the predictive uncertainty of the model.
+
+        Args:
+            x (torch.tensor): Can be either a batch of states or of features.
+            actions (torch.tensor): The actions we need uncertainties for.
+            cached_features (bool, optional): Defaults to True. If True then
+                `x` is a batch of features.
+
+        Returns:
+            torch.tensor: A vector of predictive variances.
+        """
+
         with torch.no_grad():
-            ensemble_qvals = self.estimator(x, cached_features)
+            ensemble_qvals = self.estimator(x, cached_features=cached_features)
+            qvals_var = ensemble_qvals.var(0).gather(1, actions)
+        return qvals_var
 
     def __thompson_update(self, batch):
         # scenario 1: sampled component, all data
@@ -224,10 +240,13 @@ class BootstrappedPI(DQNPolicyImprovement):
             is_double=self.is_double,
         )
 
-        # TODO: add priorities
-
         return DQNLoss(
-            loss=loss.loss, priority=None, q_values=None, q_targets=None
+            loss=loss.loss,
+            priority=self.get_uncertainty(
+                batch[0], batch[1], cached_features=False
+            ),
+            q_values=None,
+            q_targets=None,
         )
 
     def __bootstrapp_update(self, batch):
@@ -274,10 +293,14 @@ class BootstrappedPI(DQNPolicyImprovement):
             dqn_loss[boot_mask] += loss
 
         # TODO: gradient rescalling!!!
-        # TODO: add priorities
 
         return DQNLoss(
-            loss=dqn_loss, priority=None, q_values=None, q_targets=None
+            loss=dqn_loss,
+            priority=self.get_uncertainty(
+                batch[0], batch[1], cached_features=True
+            ),
+            q_values=None,
+            q_targets=None,
         )
 
     def __ensemble_update(self, batch):
@@ -297,9 +320,14 @@ class BootstrappedPI(DQNPolicyImprovement):
         # Mean of the losses of each ensemble component on the full batch
         loss = torch.cat(dqn_losses, dim=1).mean(dim=1).unsqueeze(1)
 
-        # TODO: add priorities
-
-        return DQNLoss(loss=loss, priority=None, q_values=None, q_targets=None)
+        return DQNLoss(
+            loss=loss,
+            priority=self.get_uncertainty(
+                batch[0], batch[1], cached_features=False
+            ),
+            q_values=None,
+            q_targets=None,
+        )
 
 
 if __name__ == "__main__":

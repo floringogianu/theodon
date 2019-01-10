@@ -3,7 +3,7 @@ no_gym: yes
 step_no: 4000000
 seed: no  # randomize if 0 or no
 
-double: yes
+double: no
 prioritized: no
 shared_bias: yes
 
@@ -14,7 +14,7 @@ shared_bias: yes
 # - vote decides if you evaluate the policy by voting or by mean. You can also
 #   evaluate by voting at test time when doing thomspon sampling if vote == yes
 boot:
-  k: 3
+  k: 5
   prob: 1  # no mask if boot_prob == 1
   is_thompson: yes
   vote: yes
