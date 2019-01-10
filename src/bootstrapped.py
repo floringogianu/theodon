@@ -252,7 +252,7 @@ class BootstrappedPI(DQNPolicyImprovement):
     def __bootstrapp_update(self, batch):
         # scenario 2: all ensemble components, masked data
         batch, boot_masks = batch
-        batch_sz = batch[0].shape[0]
+        bsz = batch[0].shape[0]
 
         batch = [el.to(self.device) for el in batch]
         boot_masks.to(self.device)
@@ -262,14 +262,30 @@ class BootstrappedPI(DQNPolicyImprovement):
         if self.estimator.feature_extractor is not None:
             online = self.estimator.get_features
             target = self.target_estimator.get_features
-            batch[0] = online(batch[0]).view(batch_sz, -1)
+            batch[0] = online(batch[0])
             if self.is_double:
                 with torch.no_grad():
-                    features_ = online(batch[3]).view(batch_sz, -1)
-            batch[3] = target(batch[3]).view(batch_sz, -1)
+                    features_ = online(batch[3])
+            batch[3] = target(batch[3])
 
         # split batch in mini-batches for each ensemble component.
-        batches = [[el[bm] for el in batch] for bm in boot_masks]
+        # because now state and state_ have differen dimensions we cannot do:
+        # batches = [[el[bm] for el in batch] for bm in boot_masks]
+        # instead we mask the bootmask too... :(
+        batches = []
+        for bm in boot_masks:
+            batches.append(
+                [
+                    [
+                        batch[0][bm],
+                        batch[1][bm],
+                        batch[2][bm],
+                        batch[3][bm[batch[4].squeeze()]],
+                        batch[4][bm],
+                    ],
+                    bm[batch[4].squeeze()],
+                ]
+            )
 
         # Gather the losses for each batch and ensemble component. We use
         # partial application to set which ensemble component gets trained.
@@ -282,13 +298,13 @@ class BootstrappedPI(DQNPolicyImprovement):
                     self.target_estimator, mid=mid, cached_features=True
                 ),
                 is_double=self.is_double,
-                next_states_features=features_ if self.is_double else None,
+                next_states_features=features_[bm] if self.is_double else None,
             ).loss
-            for mid, batch_ in enumerate(batches)
+            for mid, (batch_, bm) in enumerate(batches)
         ]
 
         # sum up the losses of a given transition across ensemble components
-        dqn_loss = torch.zeros((batch_sz, 1), device=dqn_losses[0].device)
+        dqn_loss = torch.zeros((bsz, 1), device=dqn_losses[0].device)
         for loss, boot_mask in zip(dqn_losses, boot_masks):
             dqn_loss[boot_mask] += loss
 
