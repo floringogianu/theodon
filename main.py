@@ -255,9 +255,9 @@ if __name__ in ["__mp_main__", "__main__"]:
         optimizer = optim.RMSprop(
             estimator.parameters(),
             lr=opt.lr,
-            momentum=0.0,
+            momentum=opt.rmsprop_momentum,
             alpha=0.95,
-            eps=0.00001,
+            eps=opt.rmsprop_eps,
             centered=True,
         )
         policy_improvement = DQNPolicyImprovement(
