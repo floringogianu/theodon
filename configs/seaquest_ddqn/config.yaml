@@ -1,0 +1,10 @@
+game:
+  - seaquest
+
+prioritized:
+  - no
+
+mem_device:
+  - cuda
+  - cpu
+
