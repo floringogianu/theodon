@@ -2,17 +2,14 @@
 """
 from functools import partial
 from copy import deepcopy
-from torch import optim
 from rl_logger import Logger
 
-from wintermute.policy_improvement import DQNPolicyImprovement
-
-from src.utils import get_process_memory
-from .common import priority_update, create_memory
+from ..utils import get_process_memory
+from .common import create_memory, get_policy_improvement
 
 
 def learn(opt):
-    """ Here's the learner's loop.
+    """ Here's the learner's loop
     """
 
     log = opt.log
@@ -23,6 +20,10 @@ def learn(opt):
     sync_queue = opt.sync_queue
     eval_queue = opt.eval_queue
     confirm_queue = opt.confirm_queue
+
+    thompson_sampling = False
+    if hasattr(opt, "boot") and opt.boot.k > 1:
+        thompson_sampling = opt.boot.is_thompson
 
     assert opt.learn_start % 100 == 0
     assert opt.learn_start % opt.update_freq == 0
@@ -49,6 +50,10 @@ def learn(opt):
             msg = experience_queue.get()
             experience_replay.push(msg)
         msg = experience_queue.get()
+
+        if thompson_sampling:
+            opt.policy_improvement.set_posterior_idx(msg[1].posterior)        
+
         batch = opt.experience_replay.push_and_sample(msg)
         step += opt.update_freq
         msg = experience_queue.get()
@@ -56,7 +61,7 @@ def learn(opt):
         if opt.prioritized:  # batch is (data, idxs, weights)
             data, idxs, weights = batch
             update_priorities = partial(
-                priority_update, opt.experience_replay, idxs, weights
+                opt.cb, opt.experience_replay, idxs, weights
             )
             opt.policy_improvement(data, cb=update_priorities)
         else:
@@ -109,27 +114,11 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
         console_options=("white", "on_blue", ["bold"]),
     )
     estimator = opt.estimator
-    target_estimator = None
-
-    # construct a policy improvement type
-    optimizer = optim.RMSprop(
-        estimator.parameters(),
-        lr=opt.lr,
-        momentum=0.0,
-        alpha=0.95,
-        eps=(opt.rmsprop_eps if hasattr(opt, "rmsprop_eps") else 0.00001),
-        centered=True,
-    )
-    policy_improvement = DQNPolicyImprovement(
-        estimator,
-        optimizer,
-        gamma=0.99,
-        is_double=opt.double,
-        target_estimator=target_estimator,
-    )
+    policy_improvement = get_policy_improvement(opt, estimator)
+    
 
     # we also need an experience replay
-    experience_replay = create_memory(opt)
+    experience_replay, update_priorities = create_memory(opt)
 
     opt.log = log
     opt.policy_improvement = policy_improvement
@@ -138,5 +127,6 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
     opt.sync_queue = sync_queue
     opt.eval_queue = eval_queue
     opt.confirm_queue = confirm_queue
+    opt.cb = update_priorities
 
     learn(opt)

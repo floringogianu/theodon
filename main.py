@@ -14,8 +14,6 @@ if __name__ == "__main__":
     from argparse import Namespace
     import concurrent.futures
 
-    from wintermute.estimators import get_estimator
-    from wintermute.estimators import BootstrappedAtariNet
     import liftoff
     from liftoff.config import read_config
 
@@ -32,7 +30,9 @@ from src.rl_routines.common import (
     process_eval_results,
     evaluate_once,
     create_memory,
-    get_dqn_routines,
+    get_policy_evaluation,
+    get_policy_improvement,
+    create_estimator
 )
 
 if __name__ == "__main__":
@@ -52,12 +52,16 @@ if __name__ == "__main__":
             executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
 
         thompson_sampling = False
-        if hasattr(opt, "boot"):
+        if hasattr(opt, "boot") and opt.boot.k > 1:
             thompson_sampling = opt.boot.is_thompson
+        if thompson_sampling:
+            ts_idx = opt.policy_evaluation.policy.sample_posterior_idx()
+            opt.policy_improvement.set_posterior_idx(ts_idx)
 
         state, reward, done = env.reset(), 0, False
         warmed_up = False
         ep_cnt, best_rw = 0, -float("inf")
+        eval_estimator = None
         for step in range(1, opt.step_no + 1):
 
             # take action and save the s to _s and a to _a to be used later
@@ -67,7 +71,7 @@ if __name__ == "__main__":
             state, reward, done, _ = env.step(pi.action)
 
             # add a (_s, _a, r, d) transition
-            opt.experience_replay.push((_state, _action, reward, state, done))
+            opt.experience_replay.push((_state, pi, reward, state, done))
 
             # sample a batch and do some learning
             do_training = (step % opt.update_freq == 0) and warmed_up
@@ -91,7 +95,7 @@ if __name__ == "__main__":
                 ep_cnt=(1 if done else 0),
                 rw_per_ep=(reward, (1 if done else 0)),
                 rw_per_step=reward,
-                max_q=pi.q_value,
+                max_q=pi.q_value if pi.q_value else float("-inf"),
                 sampling_fps=1,
                 training_fps=32 if do_training else 0,
             )
@@ -115,12 +119,12 @@ if __name__ == "__main__":
 
             if async_eval_result is not None:
                 # pylint: disable=E0633
-                eval_step, eval_estimator, result = async_eval_result
+                eval_step, _eval_estimator, result = async_eval_result
                 if result.done():
                     avgs = result.result()
                     new_eval_results = (
                         eval_step,
-                        eval_estimator.state_dict(),
+                        _eval_estimator.state_dict(),
                         *avgs,
                     )
                     async_eval_result = None
@@ -129,27 +133,27 @@ if __name__ == "__main__":
                 if opt.async_eval:
                     if async_eval_result is not None:
                         # Wait for the previous evaluation to end
-                        eval_step, eval_estimator, result = async_eval_result
+                        eval_step, _eval_estimator, result = async_eval_result
                         avgs = result.result()
                         new_eval_results = (
                             eval_step,
-                            eval_estimator.state_dict(),
+                            _eval_estimator.state_dict(),
                             *avgs,
                         )
 
-                    _estimator = deepcopy(
+                    eval_estimator = deepcopy(
                         opt.policy_evaluation.policy.estimator
-                    )
+                    ).cpu()
                     result = executor.submit(
                         test,
                         opt.eval_opt,
                         step,
-                        _estimator,
+                        eval_estimator,
                         action_space,
                         None,  # do not pickle eval_env if evaluation is async
                         opt.log,
                     )
-                    async_eval_result = (step, _estimator, result)
+                    async_eval_result = (step, eval_estimator, result)
                 else:
                     eval_estimator = deepcopy(
                         opt.policy_evaluation.policy.estimator
@@ -180,7 +184,10 @@ if __name__ == "__main__":
             new_eval_results = (eval_step, eval_estimator.state_dict(), *avgs)
             best_rw = process_eval_results(opt, new_eval_results, best_rw)
 
-        opt.log.log(train_log, step)
+        try:
+            opt.log.log(train_log, step)
+        except ZeroDivisionError:
+            pass  # It's ok, nothing really new to report here
         train_log.reset()
 
 
@@ -196,17 +203,14 @@ if __name__ in ["__mp_main__", "__main__"]:
         epsilon = get_epsilon(name="constant", start=opt.eval_epsilon)
         estimator.to("cuda")
 
-        if hasattr(opt, "boot"):
-            policy_evaluation = EpsilonGreedyPolicy(
+        if hasattr(opt, "boot") and opt.boot.k > 1:
+            policy_evaluation = BootstrappedPE(
                 estimator,
                 action_space,
                 epsilon,
-                policy=BootstrappedPE(
-                    estimator,
-                    is_thompson=opt.boot.is_thompson,
-                    vote=opt.boot.vote,
-                    test=True
-                ),
+                is_thompson=False,
+                vote=opt.boot.vote,
+                test=True,
             )
         else:
             policy_evaluation = EpsilonGreedyPolicy(
@@ -223,6 +227,9 @@ if __name__ in ["__mp_main__", "__main__"]:
         )
 
         return mean_ep_rw, mean_ep_crw
+
+
+if __name__ == "__main__":
 
     def run(opt):
         """ Here we initialize stuff.
@@ -249,23 +256,11 @@ if __name__ in ["__mp_main__", "__main__"]:
 
         # construct an estimator to be used with the policy
         action_no = env.action_space.n
-        estimator = get_estimator(
-            "atari",
-            hist_len=4,
-            action_no=action_no,
-            hidden_sz=opt.linear_size,
-            shared_bias=opt.shared_bias,
-        )
-        if hasattr(opt, "boot"):
-            estimator = BootstrappedAtariNet(
-                estimator, boot_no=opt.boot.k, full=False
-            )
-        estimator = estimator.cuda()
+        estimator = create_estimator(opt, action_no)
 
         # construct DQN/BootstrappedDQN Policy Evaluation and Improvement
-        policy_evaluation, policy_improvement = get_dqn_routines(
-            opt, estimator, action_no
-        )
+        policy_evaluation = get_policy_evaluation(opt, estimator, action_no)
+        policy_improvement = get_policy_improvement(opt, estimator)
 
         # Get Experience Replay and a callback function for updating priorities
         experience_replay, update_priorities = create_memory(opt)
@@ -298,7 +293,7 @@ if __name__ in ["__mp_main__", "__main__"]:
         opt.policy_evaluation = policy_evaluation
         opt.policy_improvement = policy_improvement
         opt.experience_replay = experience_replay
-        opt.update_priorities = update_priorities
+        opt.cb = update_priorities
         opt.log = log
 
         # print the opt

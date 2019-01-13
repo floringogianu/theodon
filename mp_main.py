@@ -14,7 +14,7 @@ if __name__ == "__main__":
     from torch import multiprocessing as mp
 
     from wintermute.env_wrappers import get_wrapped_atari
-    from wintermute.estimators import get_estimator
+    from src.rl_routines.common import create_estimator
 
     def launch_processes(opt):
         """ This is the main process that starts the rest.
@@ -31,14 +31,7 @@ if __name__ == "__main__":
         action_no = get_wrapped_atari(
             opt.game, no_gym=opt.no_gym, seed=opt.seed
         ).action_space.n
-        estimator = get_estimator(
-            "atari",
-            hist_len=opt.hist_len,
-            action_no=action_no,
-            hidden_sz=opt.hidden_sz,
-            shared_bias=opt.shared_bias,
-        )
-        estimator = estimator.cuda()
+        estimator = create_estimator(opt, action_no)
         estimator.share_memory()
 
         play_opt.estimator = estimator

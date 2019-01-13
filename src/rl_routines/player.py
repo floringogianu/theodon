@@ -8,6 +8,7 @@ from wintermute.env_wrappers import get_wrapped_atari
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 from src.utils import get_process_memory
+from src.rl_routines.common import get_policy_evaluation
 
 
 def play(opt):
@@ -28,25 +29,33 @@ def play(opt):
 
     start = time.time()
 
+    thompson_sampling = False
+    if hasattr(opt, "boot") and opt.boot.k > 1:
+        thompson_sampling = opt.boot.is_thompson
+    if thompson_sampling:
+        policy_evaluation.policy.sample_posterior_idx()
+
     sent = []
     for step in range(opt.learn_start):
         with torch.no_grad():
             pi = policy_evaluation(state)
         _state, _action = state, pi.action
         state, reward, done, _ = env.step(pi.action)
-        transition = (_state, _action, reward, state, done)
+        transition = (_state, pi, reward, state, done)
         experience_queue.put(transition)
         sent.append(transition)
         play_log.update(
             ep_cnt=int(done),
             rw_per_ep=(reward, int(done)),
             rw_per_step=reward,
-            max_q=pi.q_value,
+            max_q=pi.q_value if pi.q_value else float("-inf"),
             playing_fps=1,
         )
         if done:
             state, reward, done = env.reset(), 0, False
             ep_cnt += 1
+            if thompson_sampling:
+                policy_evaluation.policy.sample_posterior_idx()
         if not sync_queue.empty() or len(sent) > 1000:
             sync_queue.get()
             del sent[:100]
@@ -70,7 +79,7 @@ def play(opt):
             pi = opt.policy_evaluation(state)
         _state, _action = state, pi.action
         state, reward, done, _ = env.step(pi.action)
-        transition = (_state, _action, reward, state, done)
+        transition = (_state, pi, reward, state, done)
         experience_queue.put(transition)
         sent.append(transition)
 
@@ -84,14 +93,15 @@ def play(opt):
             ep_cnt=int(done),
             rw_per_ep=(reward, int(done)),
             rw_per_step=reward,
-            max_q=pi.q_value,
+            max_q=pi.q_value if pi.q_value else float("-inf"),
             playing_fps=1,
         )
 
         if done:
             state, reward, done = env.reset(), 0, False
             ep_cnt += 1
-
+            if thompson_sampling:
+                policy_evaluation.policy.sample_posterior_idx()
             if ep_cnt % opt.log_freq == 0:
                 used_ram, used_gpu = get_process_memory()
                 play_log.update(ram=used_ram, gpu=used_gpu)
@@ -125,13 +135,8 @@ def init_player(opt, experience_queue, sync_queue):
         device=torch.device("cuda"),
     )
 
-    epsilon = get_epsilon(
-        steps=opt.epsilon_steps,
-        end=opt.epsilon_end,
-        warmup_steps=opt.learn_start,
-    )
-    policy_evaluation = EpsilonGreedyPolicy(
-        opt.estimator, env.action_space.n, epsilon
+    policy_evaluation = get_policy_evaluation(
+        opt, opt.estimator, env.action_space.n
     )
 
     opt.log = log

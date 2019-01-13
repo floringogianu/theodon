@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch import optim
 
+from wintermute.estimators import get_estimator
+from wintermute.estimators import BootstrappedAtariNet
 from wintermute.policy_improvement import DQNPolicyImprovement
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
@@ -16,7 +18,6 @@ from rl_logger import Logger
 from src.utils import get_process_memory
 from src.bootstrapped import BootstrappedPE
 from src.bootstrapped import BootstrappedPI
-
 
 def init_eval_logger(out_dir=None, log: Logger = None):
     """ Here we initialize the logger used by other functions below.
@@ -71,7 +72,7 @@ def evaluate_once(  # pylint: disable=bad-continuation
             clipped_rw_per_ep=(creward, (1 if done else 0)),
             step_per_ep=(1, (1 if done else 0)),
             rw_per_step=reward,
-            max_q=pi.q_value,
+            max_q=pi.q_value if pi.q_value else float("-inf"),
             eval_fps=1,
         )
         crt_return += reward
@@ -158,7 +159,7 @@ def create_memory(opt):
     from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
     bootstrap_args = None
-    if hasattr(opt, "boot"):
+    if hasattr(opt, "boot") and opt.boot.k > 1:
         # if boot_prob is 1 then there is no mask
         if opt.boot.prob < 1:
             # set the ensemble size and bootstrapp mask probability
@@ -195,47 +196,19 @@ def create_memory(opt):
     return experience_replay, cb
 
 
-def get_dqn_routines(opt, estimator, action_no):
-    """ Constructs and returns the DQN routines used in training.
-
-    Args:
-        opt (Namespace): Settings.
-        estimator (nn.Module): An estimator to be used for policy evaluation
-            and to be optimized during policy improvement.
-       action_no (int): No of actions.
-
-    Returns:
-        [type]: [description]
-    """
-
-    # construct an epsilon greedy policy
-    # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
-    epsilon = get_epsilon(
-        steps=opt.epsilon_steps,
-        end=opt.epsilon_end,
-        warmup_steps=opt.learn_start,
-    )
-
+def get_policy_improvement(opt, estimator):
     # construct a policy improvement type
     optimizer = optim.RMSprop(
         estimator.parameters(),
         lr=opt.lr,
         momentum=0.0,
         alpha=0.95,
-        eps=0.00001,
+        eps=(opt.rmsprop_eps if hasattr(opt, "rmsprop_eps") else 0.00001),
         centered=True,
     )
     # construct policy evaluation and policy improvement objects
-    if opt.boot is not None:
+    if hasattr(opt, "boot") and opt.boot.k > 1:
         # for bootstrapping/ensemble methods
-        policy_evaluation = EpsilonGreedyPolicy(
-            estimator,
-            action_no,
-            epsilon,
-            policy=BootstrappedPE(
-                estimator, is_thompson=opt.boot.is_thompson, vote=opt.boot.vote
-            ),
-        )
         policy_improvement = BootstrappedPI(
             estimator,
             optimizer,
@@ -243,12 +216,61 @@ def get_dqn_routines(opt, estimator, action_no):
             is_double=opt.double,
             is_thompson=opt.boot.is_thompson,
             boot_mask=opt.boot.prob < 1,
+            var_method=opt.boot.var_method,  # e.g. "selected_action"
         )
     else:
-        # for all the othe we use classic DQN/DQN objects
-        policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
         policy_improvement = DQNPolicyImprovement(
             estimator, optimizer, gamma=0.99, is_double=opt.double
         )
 
-    return policy_evaluation, policy_improvement
+    return policy_improvement
+
+
+def get_policy_evaluation(opt, estimator, action_no, train=True):
+    # construct an epsilon greedy policy
+    # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
+
+    if train:
+        epsilon = get_epsilon(
+            steps=opt.epsilon_steps,
+            end=opt.epsilon_end,
+            warmup_steps=opt.learn_start,
+        )
+    else:
+        epsilon = get_epsilon(name="constant", start=opt.eval_epsilon)
+
+    # construct policy evaluation object
+    if hasattr(opt, "boot") and opt.boot.k > 1:
+        # for bootstrapping/ensemble methods
+        policy_evaluation = BootstrappedPE(
+            estimator,
+            action_no,
+            epsilon,
+            is_thompson=(opt.boot.is_thompson and train),
+            vote=opt.boot.vote,
+            var_method=opt.boot.var_method,  # e.g. "selected_action"
+            test=not train,
+        )
+
+    else:
+        # for all the othe we use classic DQN/DQN objects
+        policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
+
+    return policy_evaluation
+
+
+def create_estimator(opt, action_no):
+    estimator = get_estimator(
+        "atari",
+        hist_len=4,
+        action_no=action_no,
+        hidden_sz=opt.linear_size,
+        shared_bias=opt.shared_bias,
+    )
+    if hasattr(opt, "boot") and opt.boot.k > 1:
+        estimator = BootstrappedAtariNet(
+            estimator, boot_no=opt.boot.k, full=False
+        )
+    estimator = estimator.cuda()
+
+    return estimator

@@ -2,11 +2,15 @@
 """
 
 from wintermute.env_wrappers import get_wrapped_atari
-from wintermute.estimators import get_estimator
-from wintermute.policy_evaluation import EpsilonGreedyPolicy
-from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 
-from .common import evaluate_once, process_eval_results, init_eval_logger
+from .common import (
+    evaluate_once,
+    process_eval_results,
+    init_eval_logger,
+    get_policy_evaluation,
+    create_estimator
+)
+
 
 def evaluate(opt):
     """ Here we wait for some other process to send us a state dict to eval it.
@@ -44,18 +48,10 @@ def init_evaluator(opt, eval_queue, confirm_queue):
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
     )
 
-    eval_estimator = get_estimator(
-        "atari",
-        hist_len=opt.hist_len,
-        action_no=env.action_space.n,
-        hidden_sz=opt.hidden_sz,
-        shared_bias=opt.shared_bias,
-    )
-    eval_estimator.cuda()
+    eval_estimator = create_estimator(opt, env.action_space.n)
 
-    epsilon = get_epsilon(name="constant", start=opt.eval_epsilon)
-    policy_evaluation = EpsilonGreedyPolicy(
-        eval_estimator, env.action_space, epsilon
+    policy_evaluation = get_policy_evaluation(
+        opt, eval_estimator, env.action_space.n, train=False
     )
 
     opt.log = log
