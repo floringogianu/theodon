@@ -17,12 +17,14 @@ boot:
   k: 10
   prob: 1  # no mask if boot_prob == 1
   is_thompson: yes
-  vote: no
+  vote: yes
   var_method: selected_action
 
 linear_size: 512
 
 lr: 0.00025
+rmsprop_eps: .01
+
 update_freq: 4
 epsilon_steps: 20000
 epsilon_end: 0.1

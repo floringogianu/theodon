@@ -159,7 +159,7 @@ class BootstrappedPE:
 
         epsilon = next(self.epsilon)
         if epsilon < random.uniform():
-            action = self.action_space.sample()
+            action = random.randint(0, self.action_space.n)
             qval = qvals[action]
         else:
             qval, argmax_a = qvals.max(0)
@@ -183,7 +183,7 @@ class BootstrappedPE:
 
         epsilon = next(self.epsilon)
         if epsilon < random.uniform():
-            action = self.action_space.sample()
+            action = random.randint(0, self.action_space.n)
             qval = qvals[action]
         else:
             qval, argmax_a = qvals.max(0)
@@ -207,14 +207,21 @@ class BootstrappedPE:
         qvals, argmaxs = ensemble_qvals.max(1)
         votes = torch.zeros(act_no, dtype=argmaxs.dtype, device=argmaxs.device)
         votes.put_(argmaxs, torch.ones_like(argmaxs), accumulate=True)
-        action = votes.argmax().item()
+        
+        epsilon = next(self.epsilon)
+        if epsilon < random.uniform():
+            action = random.randint(0, self.action_space.n)
+            qval = ensemble_qvals[:, action].mean()
+        else:
+            action = votes.argmax().item()
+            qval = qvals[argmaxs == action].mean()
 
         variance = self._get_variance(ensemble_qvals, action, votes)
 
         return DeterministicEnsembleOutput(
             action=action,
             priority=variance,
-            q_value=qvals[argmaxs == action].mean(),
+            q_value=qval,
             full=ensemble_qvals,
             posterior=None,
             vote_cnt=votes,

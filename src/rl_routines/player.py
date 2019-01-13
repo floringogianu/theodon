@@ -5,8 +5,6 @@ import time
 import torch
 from rl_logger import Logger
 from wintermute.env_wrappers import get_wrapped_atari
-from wintermute.policy_evaluation import EpsilonGreedyPolicy
-from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 from src.utils import get_process_memory
 from src.rl_routines.common import get_policy_evaluation
 
