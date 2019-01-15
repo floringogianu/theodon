@@ -25,13 +25,15 @@ def play(opt):
 
     # Warm up
 
+    episode_end_callback = (
+        hasattr(policy_evaluation, "episode_end_callback")
+        and policy_evaluation.episode_end_callback
+    )
+
     start = time.time()
 
-    thompson_sampling = False
-    if hasattr(opt, "boot") and opt.boot.k > 1:
-        thompson_sampling = opt.boot.is_thompson
-    if thompson_sampling:
-        policy_evaluation.policy.sample_posterior_idx()
+    if episode_end_callback:
+        policy_evaluation.episode_end_callback()
 
     sent = []
     for step in range(opt.learn_start):
@@ -52,8 +54,8 @@ def play(opt):
         if done:
             state, reward, done = env.reset(), 0, False
             ep_cnt += 1
-            if thompson_sampling:
-                policy_evaluation.policy.sample_posterior_idx()
+            if episode_end_callback:
+                policy_evaluation.episode_end_callback()
         if not sync_queue.empty() or len(sent) > 1000:
             sync_queue.get()
             del sent[:100]
@@ -72,7 +74,7 @@ def play(opt):
     opt.log.log_info(play_log, f"Warm up ends after {end-start:.2f}s. Learn!")
 
     sent1 = []  # pylint: disable=unused-variable
-    for step in range(opt.learn_start + 1, opt.step_no + 1):
+    for step in range(opt.learn_start + 1, opt.steps + 1):
         with torch.no_grad():
             pi = opt.policy_evaluation(state)
         _state, _action = state, pi.action
@@ -98,8 +100,8 @@ def play(opt):
         if done:
             state, reward, done = env.reset(), 0, False
             ep_cnt += 1
-            if thompson_sampling:
-                policy_evaluation.policy.sample_posterior_idx()
+            if episode_end_callback:
+                policy_evaluation.episode_end_callback()
             if ep_cnt % opt.log_freq == 0:
                 used_ram, used_gpu = get_process_memory()
                 play_log.update(ram=used_ram, gpu=used_gpu)
@@ -134,7 +136,7 @@ def init_player(opt, experience_queue, sync_queue):
     )
 
     policy_evaluation = get_policy_evaluation(
-        opt, opt.estimator, env.action_space.n
+        opt.train_policy_evaluation, opt.estimator, env.action_space.n
     )
 
     opt.log = log

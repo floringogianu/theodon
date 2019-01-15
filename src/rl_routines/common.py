@@ -8,8 +8,7 @@ import numpy as np
 import torch
 from torch import optim
 
-from wintermute.estimators import get_estimator
-from wintermute.estimators import BootstrappedAtariNet
+from wintermute.estimators import get_atari_estimator
 from wintermute.policy_improvement import DQNPolicyImprovement
 from wintermute.policy_evaluation import get_epsilon_schedule as get_epsilon
 from wintermute.policy_evaluation import EpsilonGreedyPolicy
@@ -18,6 +17,7 @@ from rl_logger import Logger
 from src.utils import get_process_memory
 from src.bootstrapped import BootstrappedPE
 from src.bootstrapped import BootstrappedPI
+
 
 def init_eval_logger(out_dir=None, log: Logger = None):
     """ Here we initialize the logger used by other functions below.
@@ -159,29 +159,24 @@ def create_memory(opt):
     from wintermute.replay.prioritized_replay import ProportionalSampler as PER
 
     bootstrap_args = None
-    if hasattr(opt, "boot") and opt.boot.k > 1:
-        # if boot_prob is 1 then there is no mask
-        if opt.boot.prob < 1:
-            # set the ensemble size and bootstrapp mask probability
-            bootstrap_args = (opt.boot.k, opt.boot.prob)
-
-    _er_async = opt.async_memory and not opt.prioritized
+    if opt.heads_no > 1 and opt.mask and opt.mask < 1:
+        bootstrap_args = (opt.heads_no, opt.mask)
     cb = None
 
     if opt.pinned_memory:
         experience_replay = PinnedER(
             opt.mem_size,
-            batch_size=(opt.batch_size if hasattr(opt, "batch_size") else 32),
-            async_memory=_er_async,
+            batch_size=opt.batch_size,
+            async_memory=opt.async_memory and not opt.prioritized,
             device=opt.mem_device,
-            bootstrap_args=bootstrap_args,
+            bootstrap_args=bootstrap_args
         )
     else:
         experience_replay = ER(
             opt.mem_size,
-            batch_size=(opt.batch_size if hasattr(opt, "batch_size") else 32),
-            async_memory=_er_async,
-            bootstrap_args=bootstrap_args,
+            batch_size=opt.batch_size,
+            async_memory=opt.async_memory and not opt.prioritized,
+            bootstrap_args=bootstrap_args
         )
     if opt.prioritized:
         experience_replay = PER(
@@ -198,27 +193,23 @@ def create_memory(opt):
 
 def get_policy_improvement(opt, estimator):
     # construct a policy improvement type
-    optimizer = optim.RMSprop(
+    optimizer = getattr(optim, opt.optimizer_name)(
         estimator.parameters(),
-        lr=opt.lr,
-        momentum=0.0,
-        alpha=0.95,
-        eps=(opt.rmsprop_eps if hasattr(opt, "rmsprop_eps") else 0.00001),
-        centered=True,
+        **opt.optimizer_args.__dict__
     )
+
+    target = create_estimator(opt, estimator.actions_no)
     # construct policy evaluation and policy improvement objects
-    if hasattr(opt, "boot") and opt.boot.k > 1:
+    if hasattr(opt, "heads_no") and opt.heads_no > 1:
         # for bootstrapping/ensemble methods
         policy_improvement = BootstrappedPI(
             estimator,
             optimizer,
-            gamma=0.99,
-            is_double=opt.double,
-            is_thompson=opt.boot.is_thompson,
-            boot_mask=opt.boot.prob < 1,
-            var_method=opt.boot.var_method,  # e.g. "selected_action"
+            target,
+            **opt.__dict__
         )
     else:
+        raise NotImplementedError
         policy_improvement = DQNPolicyImprovement(
             estimator, optimizer, gamma=0.99, is_double=opt.double
         )
@@ -240,18 +231,14 @@ def get_policy_evaluation(opt, estimator, action_no, train=True):
         epsilon = get_epsilon(name="constant", start=opt.eval_epsilon)
 
     # construct policy evaluation object
-    if hasattr(opt, "boot") and opt.boot.k > 1:
-        # for bootstrapping/ensemble methods
+    if hasattr(opt, "heads_no") and opt.heads_no > 1:
+        # We need a way to combine several predictions
         policy_evaluation = BootstrappedPE(
             estimator,
             action_no,
             epsilon,
-            is_thompson=(opt.boot.is_thompson and train),
-            vote=opt.boot.vote,
-            var_method=opt.boot.var_method,  # e.g. "selected_action"
-            test=not train,
+            **opt.__dict__
         )
-
     else:
         # for all the othe we use classic DQN/DQN objects
         policy_evaluation = EpsilonGreedyPolicy(estimator, action_no, epsilon)
@@ -260,17 +247,6 @@ def get_policy_evaluation(opt, estimator, action_no, train=True):
 
 
 def create_estimator(opt, action_no):
-    estimator = get_estimator(
-        "atari",
-        hist_len=4,
-        action_no=action_no,
-        hidden_sz=opt.linear_size,
-        shared_bias=opt.shared_bias,
-    )
-    if hasattr(opt, "boot") and opt.boot.k > 1:
-        estimator = BootstrappedAtariNet(
-            estimator, boot_no=opt.boot.k, full=False
-        )
-    estimator = estimator.cuda()
-
+    estimator = get_atari_estimator(action_no, **opt.atari_estimator.__dict__)
+    estimator.to("cuda")
     return estimator

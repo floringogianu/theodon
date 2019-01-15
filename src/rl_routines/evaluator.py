@@ -8,7 +8,7 @@ from .common import (
     process_eval_results,
     init_eval_logger,
     get_policy_evaluation,
-    create_estimator
+    create_estimator,
 )
 
 
@@ -51,9 +51,11 @@ def init_evaluator(opt, eval_queue, confirm_queue):
     eval_estimator = create_estimator(opt, env.action_space.n)
 
     policy_evaluation = get_policy_evaluation(
-        opt, eval_estimator, env.action_space.n, train=False
+        opt.eval_policy_evaluation,
+        eval_estimator,
+        env.action_space.n,
+        train=False,
     )
-
     opt.log = log
     opt.env = env
     opt.policy_evaluation = policy_evaluation

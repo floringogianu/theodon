@@ -34,6 +34,8 @@ if __name__ == "__main__":
         estimator = create_estimator(opt, action_no)
         estimator.share_memory()
 
+        print("Created this estimator: ", estimator)
+
         play_opt.estimator = estimator
         learn_opt.estimator = estimator
 
@@ -44,12 +46,12 @@ if __name__ == "__main__":
         eval_queue = mp.Queue()
         confirm_queue = mp.Queue()
 
-        play_proc = mp.Process(
+        player = mp.Process(
             target=init_player, args=(play_opt, experience_queue, sync_queue)
         )
-        play_proc.start()
+        player.start()
 
-        learn_proc = mp.Process(
+        learner = mp.Process(
             target=init_learner,
             args=(
                 learn_opt,
@@ -59,16 +61,17 @@ if __name__ == "__main__":
                 confirm_queue,
             ),
         )
-        learn_proc.start()
+        learner.start()
 
-        eval_proc = mp.Process(
+        evaluator = mp.Process(
             target=init_evaluator, args=(eval_opt, eval_queue, confirm_queue)
         )
-        eval_proc.start()
+        evaluator.start()
 
-        learn_proc.join()
-        eval_proc.join()
-        play_proc.join()
+        player.join()
+        learner.join()
+        evaluator.join()
+
 
     def main():
         """ Reads configuration.

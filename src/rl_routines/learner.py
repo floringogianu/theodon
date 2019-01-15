@@ -21,13 +21,9 @@ def learn(opt):
     eval_queue = opt.eval_queue
     confirm_queue = opt.confirm_queue
 
-    thompson_sampling = False
-    if hasattr(opt, "boot") and opt.boot.k > 1:
-        thompson_sampling = opt.boot.is_thompson
-
     assert opt.learn_start % 100 == 0
     assert opt.learn_start % opt.update_freq == 0
-    assert opt.step_no % opt.update_freq == 0
+    assert opt.steps % opt.update_freq == 0
     assert opt.target_update % opt.update_freq == 0
 
     for step in range(1, opt.learn_start + 1):
@@ -45,20 +41,17 @@ def learn(opt):
 
     last_state = None
     step = opt.learn_start
-    while step < opt.step_no:
+    while step < opt.steps:
         for _ in range(opt.update_freq - 1):
             msg = experience_queue.get()
             experience_replay.push(msg)
         msg = experience_queue.get()
 
-        if thompson_sampling:
-            opt.policy_improvement.set_posterior_idx(msg[1].posterior)        
-
         batch = opt.experience_replay.push_and_sample(msg)
         step += opt.update_freq
         msg = experience_queue.get()
 
-        if opt.prioritized:  # batch is (data, idxs, weights)
+        if opt.training.prioritized:  # batch is (data, idxs, weights)
             data, idxs, weights = batch
             update_priorities = partial(
                 opt.cb, opt.experience_replay, idxs, weights
@@ -114,11 +107,10 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
         console_options=("white", "on_blue", ["bold"]),
     )
     estimator = opt.estimator
-    policy_improvement = get_policy_improvement(opt, estimator)
-    
+    policy_improvement = get_policy_improvement(opt.training, estimator)
 
     # we also need an experience replay
-    experience_replay, update_priorities = create_memory(opt)
+    experience_replay, update_priorities = create_memory(opt.training)
 
     opt.log = log
     opt.policy_improvement = policy_improvement

@@ -1,0 +1,63 @@
+game: gopher
+no_gym: yes
+seed: no  # randomize if 0 or no
+
+hist_len: &HIST_LEN 4
+heads_no: &HEADS_NO 3
+gamma: &GAMMA 0.99
+steps: &STEPS 50000000
+learn_start: &LEARN_START 50000
+update_freq: 4
+target_update: 30000
+
+log_freq: 1000
+learn_log_freq: 50000
+eval_freq: 250000
+eval_steps: 125000
+
+atari_estimator: &ATARI_ESTIMATOR
+  heads_no: *HEADS_NO
+  hidden_size: 512
+  shared_bias: yes
+  hist_len: *HIST_LEN
+  use_priors: yes
+
+train_policy_evaluation:
+  steps: *STEPS
+  heads_no: *HEADS_NO
+  learn_start: *LEARN_START
+  epsilon_steps: 1000000
+  epsilon_end: 0.01
+  action_selection: thompson
+  priority: no
+
+eval_policy_evaluation:
+  heads_no: *HEADS_NO
+  eval_epsilon: 0.01
+  action_selection: best_mean
+  priority: no
+
+training:
+  gamma: *GAMMA
+  heads_no: *HEADS_NO
+  steps: *STEPS
+  
+  double: yes
+  mask: .5
+  
+  prioritized: no
+  mem_size: 1000000
+  mem_device: cuda
+  pinned_memory: no
+  async_memory: yes
+
+  atari_estimator: *ATARI_ESTIMATOR
+
+  batch_size: 32
+  optimizer_name: RMSprop
+  optimizer_args:
+    lr: 0.00025
+    momentum: 0
+    centered: True
+    alpha: 0.95
+    eps: 0.01
