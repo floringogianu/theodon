@@ -28,13 +28,13 @@ train_policy_evaluation:
   learn_start: *LEARN_START
   epsilon_steps: 1000000
   epsilon_end: 0.01
-  action_selection: thompson
+  action_selection: sample_best
   priority: no
 
 eval_policy_evaluation:
   heads_no: *HEADS_NO
   eval_epsilon: 0.01
-  action_selection: [best_mean, thompson, most_voted, best_from_gaussian_sample]
+  action_selection: [best_mean, sample_best, thompson, most_voted, best_from_gaussian_sample]
   priority: no
 
 training:

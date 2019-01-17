@@ -120,7 +120,9 @@ class BootstrappedPE:
             raise ValueError("q_values is supposed to be 3D.")
         batch_size, heads_no, _actions_no = q_values.shape
         proposals = q_values.argmax(dim=2)
-        sampled_heads = torch.randint(0, heads_no, (batch_size, 1))
+        sampled_heads = torch.randint(
+            0, heads_no, (batch_size, 1), device=proposals.device
+        )
         actions = proposals.gather(1, sampled_heads)
         return actions
 
@@ -153,7 +155,7 @@ class BootstrappedPE:
 
         alpha = 1e-4
         while True:
-            try:        
+            try:
                 dist = MultivariateNormal(means, covs)
                 break
             except RuntimeError:
@@ -161,7 +163,6 @@ class BootstrappedPE:
                 alpha *= 10
         actions = dist.sample((1,)).argmax(dim=2)
         return actions.squeeze(1)
-
 
     def _reset_head(self):
         """ Samples one of the components of the ensemble and returns its
