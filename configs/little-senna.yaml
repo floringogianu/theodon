@@ -3,17 +3,17 @@ no_gym: yes
 seed: no  # randomize if 0 or no
 
 hist_len: &HIST_LEN 4
-heads_no: &HEADS_NO 10
+heads_no: &HEADS_NO 3
 gamma: &GAMMA 0.99
-steps: &STEPS 50000000
-learn_start: &LEARN_START 50000
+steps: &STEPS 25000
+learn_start: &LEARN_START 2000
 update_freq: 4
-target_update: 30000
+target_update: 4500
 
-log_freq: 1000
-learn_log_freq: 50000
-eval_freq: 250000
-eval_steps: 125000
+log_freq: 100
+learn_log_freq: 5000
+eval_freq: 2500
+eval_steps: 125
 
 atari_estimator: &ATARI_ESTIMATOR
   heads_no: *HEADS_NO
@@ -34,7 +34,7 @@ train_policy_evaluation:
 eval_policy_evaluation:
   heads_no: *HEADS_NO
   eval_epsilon: 0.01
-  action_selection: best_mean
+  action_selection: [best_mean, thompson, most_voted, best_from_gaussian_sample]
   priority: no
 
 training:
@@ -48,7 +48,7 @@ training:
   prioritized: no
   mem_size: 10000
   mem_device: cuda
-  pinned_memory: yes
+  pinned_memory: no
   async_memory: yes
 
   atari_estimator: *ATARI_ESTIMATOR

@@ -54,7 +54,7 @@ def play(opt):
         if done:
             state, reward, done = env.reset(), 0, False
             ep_cnt += 1
-            if episode_end_callback:
+            if policy_evaluation.episode_end_callback:
                 policy_evaluation.episode_end_callback()
         if not sync_queue.empty() or len(sent) > 1000:
             sync_queue.get()
@@ -100,7 +100,7 @@ def play(opt):
         if done:
             state, reward, done = env.reset(), 0, False
             ep_cnt += 1
-            if episode_end_callback:
+            if policy_evaluation.episode_end_callback:
                 policy_evaluation.episode_end_callback()
             if ep_cnt % opt.log_freq == 0:
                 used_ram, used_gpu = get_process_memory()

@@ -19,37 +19,40 @@ from src.bootstrapped import BootstrappedPE
 from src.bootstrapped import BootstrappedPI
 
 
-def init_eval_logger(out_dir=None, log: Logger = None):
+def init_eval_logger(out_dir=None, log: Logger = None, names=None):
     """ Here we initialize the logger used by other functions below.
     """
     if log is None:
         log = Logger(label="label", path=out_dir)
-    log.add_group(
-        tag="evaluation",
-        metrics=(
-            log.SumMetric("ep_cnt"),
-            log.EpisodicMetric("rw_per_ep", emph=True),
-            log.EpisodicMetric("clipped_rw_per_ep", emph=True),
-            log.AvgMetric("step_per_ep"),
-            log.AvgMetric("rw_per_step"),
-            log.MaxMetric("max_q"),
-            log.FPSMetric("eval_fps"),
-            log.MaxMetric("ram"),
-            log.MaxMetric("gpu"),
-        ),
-        console_options=("white", "on_magenta", ["bold"]),
-    )
+    if names is None:
+        names = [""]
+    for name in names:
+        log.add_group(
+            tag=f"evaluation-w-{name:s}" if name else "evaluation",
+            metrics=(
+                log.SumMetric("ep_cnt"),
+                log.EpisodicMetric("rw_per_ep", emph=True),
+                log.EpisodicMetric("clipped_rw_per_ep", emph=True),
+                log.AvgMetric("step_per_ep"),
+                log.AvgMetric("rw_per_step"),
+                log.MaxMetric("max_q"),
+                log.FPSMetric("eval_fps"),
+                log.MaxMetric("ram"),
+                log.MaxMetric("gpu"),
+            ),
+            console_options=("white", "on_magenta", ["bold"]),
+        )
     return log
 
 
 def evaluate_once(  # pylint: disable=bad-continuation
-    crt_step, policy_evaluation, env, eval_steps, log
+    crt_step, policy_evaluation, env, eval_steps, log, log_name="evaluation"
 ) -> Tuple[float, float]:
     """ Here we evaluate a policy.
     """
-    eval_log = log.groups["evaluation"]
+    eval_log = log.groups[log_name]
     eval_log.reset()
-    log.log_info(eval_log, f"Start evaluation at {crt_step} training steps.")
+    log.log_info(eval_log, f"Start {log_name} at {crt_step} training steps.")
 
     total_rw, total_crw = 0, 0
     nepisodes = 0
@@ -60,6 +63,8 @@ def evaluate_once(  # pylint: disable=bad-continuation
         if done:
             state, reward, done = env.reset(), 0, False
             crt_return, crt_creturn = 0, 0
+            if policy_evaluation.episode_end_callback:
+                policy_evaluation.episode_end_callback()
         with torch.no_grad():
             pi = policy_evaluation(state)
         state, reward, done, _ = env.step(pi.action)
@@ -99,8 +104,8 @@ def process_eval_results(opt, new_eval_results, best_rw) -> float:
        We save the model if needed. The function returns the higher value
        between the previous best reward and the current result.
     """
-    eval_step, model, mean_ep_rw, mean_ep_crw = new_eval_results
-    eval_log = opt.log.groups["evaluation"]
+    eval_step, model, mean_ep_rw, mean_ep_crw, act_selection = new_eval_results
+    eval_log = opt.log.groups[f"evaluation-w-{act_selection:s}"]
 
     if mean_ep_rw > best_rw:
         opt.log.log_info(
@@ -112,33 +117,52 @@ def process_eval_results(opt, new_eval_results, best_rw) -> float:
             f"{opt.out_dir}/best_model.pth",
         )
         best_rw = mean_ep_rw
-    # save model
-    if eval_step % 1_000_000 == 0:
-        torch.save(
-            {"rw_per_ep": mean_ep_rw, "step": eval_step, "model": model},
-            f"{opt.out_dir}/model_{eval_step}.pth",
-        )
 
-    if not hasattr(opt, "evals"):
-        opt.evals = []
-    if not hasattr(opt, "clipped_evals"):
-        opt.clipped_evals = []
+    if not hasattr(opt, f"{act_selection:s}_evals"):
+        setattr(opt, f"{act_selection:s}_evals", [])
+    if not hasattr(opt, f"{act_selection:s}_clipped_evals"):
+        setattr(opt, f"{act_selection:s}_clipped_evals", [])
 
-    opt.evals.append(mean_ep_rw)
-    opt.clipped_evals.append(mean_ep_crw)
-    summary = {
-        "best": best_rw,
-        "last-5": np.mean(opt.evals[-5:]),
-        "last-10": np.mean(opt.evals[-10:]),
-        "best-clip": np.max(opt.clipped_evals),
-        "last-5-clip": np.mean(opt.clipped_evals[-5:]),
-        "last-10-clip": np.mean(opt.clipped_evals[-10:]),
-        "step": eval_step,
-    }
-    with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
-        pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
+    evals = getattr(opt, f"{act_selection:s}_evals")
+    clipped_evals = getattr(opt, f"{act_selection:s}_clipped_evals")
+
+    evals.append(mean_ep_rw)
+    clipped_evals.append(mean_ep_crw)
 
     return best_rw
+
+
+def save_summary(opt, step):
+    summary = {"step": step}
+    full_summary = {"step": step}
+    for action_selection in opt.action_selection:
+        evals = getattr(opt, f"{action_selection:s}_evals")
+        clipped_evals = getattr(opt, f"{action_selection:s}_clipped_evals")
+
+        full_summary[f"{action_selection:s}_evals"] = evals
+        full_summary[f"{action_selection:s}_clipped_evals"] = clipped_evals
+
+        if len(evals) < 5:
+            summary[f"{action_selection:s}-best5"] = np.mean(evals)
+            summary[f"{action_selection:s}-last5"] = np.mean(evals)
+
+            summary[f"{action_selection:s}-best5-C"] = np.mean(clipped_evals)
+            summary[f"{action_selection:s}-last5-C"] = np.mean(clipped_evals)
+        else:
+            avg5 = np.convolve(evals, np.ones((5,)) / 5.0)[4:-4]
+            clipped_avg5 = np.convolve(clipped_evals, np.ones((5,)) / 5.0)[4:-4]
+
+            summary[f"{action_selection:s}-best5"] = avg5.max()
+            summary[f"{action_selection:s}-last5"] = avg5[-1]
+
+            summary[f"{action_selection:s}-best5-C"] = clipped_avg5.max()
+            summary[f"{action_selection:s}-last5-C"] = clipped_avg5[-1]
+
+    with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
+        pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
+    
+    with open(f"{opt.out_dir}/full_summary.pkl", "wb") as handler:
+        pickle.dump(full_summary, handler, pickle.HIGHEST_PROTOCOL)
 
 
 def priority_update(mem, idxs, weights, dqn_loss):
@@ -169,14 +193,14 @@ def create_memory(opt):
             batch_size=opt.batch_size,
             async_memory=opt.async_memory and not opt.prioritized,
             device=opt.mem_device,
-            bootstrap_args=bootstrap_args
+            bootstrap_args=bootstrap_args,
         )
     else:
         experience_replay = ER(
             opt.mem_size,
             batch_size=opt.batch_size,
             async_memory=opt.async_memory and not opt.prioritized,
-            bootstrap_args=bootstrap_args
+            bootstrap_args=bootstrap_args,
         )
     if opt.prioritized:
         experience_replay = PER(
@@ -194,8 +218,7 @@ def create_memory(opt):
 def get_policy_improvement(opt, estimator):
     # construct a policy improvement type
     optimizer = getattr(optim, opt.optimizer_name)(
-        estimator.parameters(),
-        **opt.optimizer_args.__dict__
+        estimator.parameters(), **opt.optimizer_args.__dict__
     )
 
     target = create_estimator(opt, estimator.actions_no)
@@ -203,13 +226,11 @@ def get_policy_improvement(opt, estimator):
     if hasattr(opt, "heads_no") and opt.heads_no > 1:
         # for bootstrapping/ensemble methods
         policy_improvement = BootstrappedPI(
-            estimator,
-            optimizer,
-            target,
-            **opt.__dict__
+            estimator, optimizer, target, **opt.__dict__
         )
     else:
-        raise NotImplementedError
+        # pylint: disable=unreachable
+        raise NotImplementedError("Code does not support single head")
         policy_improvement = DQNPolicyImprovement(
             estimator, optimizer, gamma=0.99, is_double=opt.double
         )
@@ -234,10 +255,7 @@ def get_policy_evaluation(opt, estimator, action_no, train=True):
     if hasattr(opt, "heads_no") and opt.heads_no > 1:
         # We need a way to combine several predictions
         policy_evaluation = BootstrappedPE(
-            estimator,
-            action_no,
-            epsilon,
-            **opt.__dict__
+            estimator, action_no, epsilon, **opt.__dict__
         )
     else:
         # for all the othe we use classic DQN/DQN objects

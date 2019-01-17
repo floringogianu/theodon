@@ -9,6 +9,7 @@ from .common import (
     init_eval_logger,
     get_policy_evaluation,
     create_estimator,
+    save_summary
 )
 
 
@@ -27,12 +28,23 @@ def evaluate(opt):
         step, state_dict = msg
         policy_evaluation.policy.estimator.load_state_dict(state_dict)
         policy_evaluation.policy.estimator.cuda()
-        mean_ep_rw, mean_ep_crw = evaluate_once(
-            step, policy_evaluation, env, opt.eval_steps, opt.log
-        )
-        best_rw = process_eval_results(
-            opt, (step, state_dict, mean_ep_rw, mean_ep_crw), best_rw
-        )
+        for action_selection in opt.action_selection:
+            tag = f"evaluation-w-{action_selection:s}"
+            policy_evaluation.action_selection = action_selection
+            mean_ep_rw, mean_ep_crw = evaluate_once(
+                step,
+                policy_evaluation,
+                env,
+                opt.eval_steps,
+                opt.log,
+                log_name=tag,
+            )
+            best_rw = process_eval_results(
+                opt,
+                (step, state_dict, mean_ep_rw, mean_ep_crw, action_selection),
+                best_rw,
+            )
+        save_summary(opt, step)
         confirm_queue.put(best_rw)
         msg = eval_queue.get()
     return best_rw
@@ -42,13 +54,18 @@ def init_evaluator(opt, eval_queue, confirm_queue):
     """ Here we initialize the evaluator, creating objects and shit.
     """
 
-    log = init_eval_logger(opt.out_dir)
-
     env = get_wrapped_atari(
         opt.game, mode="testing", seed=opt.seed, no_gym=opt.no_gym
     )
 
     eval_estimator = create_estimator(opt, env.action_space.n)
+
+    # This is not the most beautiful way to do it
+    if isinstance(opt.eval_policy_evaluation.action_selection, list):
+        opt.action_selection = opt.eval_policy_evaluation.action_selection
+        opt.eval_policy_evaluation.action_selection = opt.action_selection[0]
+    else:
+        opt.action_selection = [opt.eval_policy_evaluation.action_selection]
 
     policy_evaluation = get_policy_evaluation(
         opt.eval_policy_evaluation,
@@ -56,6 +73,9 @@ def init_evaluator(opt, eval_queue, confirm_queue):
         env.action_space.n,
         train=False,
     )
+
+    log = init_eval_logger(opt.out_dir, names=opt.action_selection)
+
     opt.log = log
     opt.env = env
     opt.policy_evaluation = policy_evaluation
