@@ -151,7 +151,6 @@ class BootstrappedPE:
         means = q_values.mean(dim=1)
         centered_qs = q_values - means.unsqueeze(1)
         covs = torch.bmm(centered_qs.transpose(1, 2), centered_qs) / heads_no
-        dist = MultivariateNormal(means, covs)
 
         alpha = 1e-4
         while True:
