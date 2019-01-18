@@ -26,7 +26,15 @@ if __name__ == "__main__":
 
         play_opt = deepcopy(opt)
         learn_opt = deepcopy(opt)
-        eval_opt = deepcopy(opt)
+
+        if isinstance(opt.eval_policy_evaluation.action_selection, str):
+            action_selection = [opt.eval_policy_evaluation.action_selection]
+            opt.eval_policy_evaluation.action_selection = action_selection
+        elif not isinstance(opt.eval_policy_evaluation.action_selection, list):
+            raise ValueError(
+                "Expected list or str for action_selection, but got "
+                f"{opt.eval_policy_evaluation.action_selection}."
+            )
 
         action_no = get_wrapped_atari(
             opt.game, no_gym=opt.no_gym, seed=opt.seed
@@ -43,8 +51,11 @@ if __name__ == "__main__":
 
         experience_queue = mp.Queue()
         sync_queue = mp.Queue()
-        eval_queue = mp.Queue()
-        confirm_queue = mp.Queue()
+        eval_queues = []
+        confirm_queues = []
+        for action_selection in opt.eval_policy_evaluation.action_selection:
+            eval_queues.append(mp.Queue())
+            confirm_queues.append(mp.Queue())
 
         player = mp.Process(
             target=init_player, args=(play_opt, experience_queue, sync_queue)
@@ -57,21 +68,29 @@ if __name__ == "__main__":
                 learn_opt,
                 experience_queue,
                 sync_queue,
-                eval_queue,
-                confirm_queue,
+                eval_queues,
+                confirm_queues,
             ),
         )
         learner.start()
 
-        evaluator = mp.Process(
-            target=init_evaluator, args=(eval_opt, eval_queue, confirm_queue)
-        )
-        evaluator.start()
+        evaluators = []
+        for idx, confirm_queue in enumerate(confirm_queues):
+            action_selection = opt.eval_policy_evaluation.action_selection[idx]
+            eval_queue = eval_queues[idx]
+            eval_opt = deepcopy(opt)
+            eval_opt.eval_policy_evaluation.action_selection = action_selection
+            evaluator = mp.Process(
+                target=init_evaluator,
+                args=(eval_opt, eval_queue, confirm_queue),
+            )
+            evaluator.start()
+            evaluators.append(evaluator)
 
         player.join()
         learner.join()
-        evaluator.join()
-
+        for evaluator in evaluators:
+            evaluator.join()
 
     def main():
         """ Reads configuration.

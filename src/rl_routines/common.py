@@ -129,39 +129,38 @@ def process_eval_results(opt, new_eval_results, best_rw) -> float:
     evals.append(mean_ep_rw)
     clipped_evals.append(mean_ep_crw)
 
+    save_summary(eval_step, act_selection, evals, clipped_evals, opt.out_dir)
+
     return best_rw
 
 
-def save_summary(opt, step):
+def save_summary(step, action_selection, evals, clipped_evals, out_dir):
     summary = {"step": step}
     full_summary = {"step": step}
-    for action_selection in opt.action_selection:
-        evals = getattr(opt, f"{action_selection:s}_evals")
-        clipped_evals = getattr(opt, f"{action_selection:s}_clipped_evals")
 
-        full_summary[f"{action_selection:s}_evals"] = evals
-        full_summary[f"{action_selection:s}_clipped_evals"] = clipped_evals
+    full_summary[f"{action_selection:s}_evals"] = evals
+    full_summary[f"{action_selection:s}_clipped_evals"] = clipped_evals
 
-        if len(evals) < 5:
-            summary[f"{action_selection:s}-best5"] = np.mean(evals)
-            summary[f"{action_selection:s}-last5"] = np.mean(evals)
+    if len(evals) < 5:
+        summary[f"{action_selection:s}-best5"] = np.mean(evals)
+        summary[f"{action_selection:s}-last5"] = np.mean(evals)
 
-            summary[f"{action_selection:s}-best5-C"] = np.mean(clipped_evals)
-            summary[f"{action_selection:s}-last5-C"] = np.mean(clipped_evals)
-        else:
-            avg5 = np.convolve(evals, np.ones((5,)) / 5.0)[4:-4]
-            clipped_avg5 = np.convolve(clipped_evals, np.ones((5,)) / 5.0)[4:-4]
+        summary[f"_{action_selection:s}-best5-C"] = np.mean(clipped_evals)
+        summary[f"_{action_selection:s}-last5-C"] = np.mean(clipped_evals)
+    else:
+        avg5 = np.convolve(evals, np.ones((5,)) / 5.0)[4:-4]
+        clipped_avg5 = np.convolve(clipped_evals, np.ones((5,)) / 5.0)[4:-4]
 
-            summary[f"{action_selection:s}-best5"] = avg5.max()
-            summary[f"{action_selection:s}-last5"] = avg5[-1]
+        summary[f"{action_selection:s}-best5"] = avg5.max()
+        summary[f"{action_selection:s}-last5"] = avg5[-1]
 
-            summary[f"{action_selection:s}-best5-C"] = clipped_avg5.max()
-            summary[f"{action_selection:s}-last5-C"] = clipped_avg5[-1]
+        summary[f"_{action_selection:s}-best5-C"] = clipped_avg5.max()
+        summary[f"_{action_selection:s}-last5-C"] = clipped_avg5[-1]
 
-    with open(f"{opt.out_dir}/summary.pkl", "wb") as handler:
+    with open(f"{out_dir}/{action_selection:s}_summary.pkl", "wb") as handler:
         pickle.dump(summary, handler, pickle.HIGHEST_PROTOCOL)
     
-    with open(f"{opt.out_dir}/full_summary.pkl", "wb") as handler:
+    with open(f"{out_dir}/{action_selection:s}_trace.pkl", "wb") as handler:
         pickle.dump(full_summary, handler, pickle.HIGHEST_PROTOCOL)
 
 

@@ -164,6 +164,21 @@ class BootstrappedPE:
         actions = dist.sample((1,)).argmax(dim=2)
         return actions.squeeze(1)
 
+    def _most_probable_best_action(self, q_values):
+        if q_values.ndimension() != 3:
+            raise ValueError("q_values is supposed to be 3D.")
+        _, heads_no, actions_no = q_values.shape
+        dims = (heads_no, actions_no)
+
+        right = q_values.view(-1, *dims, 1, 1).expand(-1, -1, -1, *dims)
+        left = q_values.view(-1, 1, 1, *dims).expand(-1, *dims, -1, -1)
+        scores = (right > left).sum(3).float()
+        scores /= 2
+        for i in range(actions_no):
+            scores[:,:,i,i] = 1
+        actions = scores.prod(dim=-1).sum(dim=1).argmax(dim=1)
+        return actions
+
     def _reset_head(self):
         """ Samples one of the components of the ensemble and returns its
             index.

@@ -18,8 +18,8 @@ def learn(opt):
     experience_replay = opt.experience_replay
     experience_queue = opt.experience_queue
     sync_queue = opt.sync_queue
-    eval_queue = opt.eval_queue
-    confirm_queue = opt.confirm_queue
+    eval_queues = opt.eval_queues
+    confirm_queues = opt.confirm_queues
 
     assert opt.learn_start % 100 == 0
     assert opt.learn_start % opt.update_freq == 0
@@ -65,11 +65,13 @@ def learn(opt):
 
         if step % opt.eval_freq == 0:
             if last_state:
-                confirm_queue.get()
+                for confirm_queue in confirm_queues:
+                    confirm_queue.get()
             last_state = (  # TODO: is there a better way?
                 deepcopy(policy_improvement.estimator).cpu().state_dict()
             )
-            eval_queue.put((step, last_state))
+            for eval_queue in eval_queues:
+                eval_queue.put((step, last_state))
 
         sync_queue.put(1)
 
@@ -88,11 +90,14 @@ def learn(opt):
     train_log.reset()
 
     if last_state is not None:
-        confirm_queue.get()
-    eval_queue.put("done")
+        for eval_queue, confirm_queue in zip(eval_queues, confirm_queues):
+            confirm_queue.get()
+            eval_queue.put("done")
 
 
-def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
+def init_learner(  # pylint: disable=bad-continuation
+    opt, experience_queue, sync_queue, eval_queues, confirm_queues
+):
     """ Function to serve as target for the learner process.
     """
     log = Logger(label="label", path=opt.out_dir)
@@ -117,8 +122,8 @@ def init_learner(opt, experience_queue, sync_queue, eval_queue, confirm_queue):
     opt.experience_replay = experience_replay
     opt.experience_queue = experience_queue
     opt.sync_queue = sync_queue
-    opt.eval_queue = eval_queue
-    opt.confirm_queue = confirm_queue
+    opt.eval_queues = eval_queues
+    opt.confirm_queues = confirm_queues
     opt.cb = update_priorities
 
     learn(opt)

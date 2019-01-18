@@ -9,7 +9,6 @@ from .common import (
     init_eval_logger,
     get_policy_evaluation,
     create_estimator,
-    save_summary
 )
 
 
@@ -44,7 +43,6 @@ def evaluate(opt):
                 (step, state_dict, mean_ep_rw, mean_ep_crw, action_selection),
                 best_rw,
             )
-        save_summary(opt, step)
         confirm_queue.put(best_rw)
         msg = eval_queue.get()
     return best_rw
