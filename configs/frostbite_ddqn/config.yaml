@@ -1,0 +1,7 @@
+game:
+  - frostbite
+
+mem_device:
+  - cuda
+  - cpu
+

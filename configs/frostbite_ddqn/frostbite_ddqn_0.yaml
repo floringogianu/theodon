@@ -1,0 +1,6 @@
+_experiment_parameters:
+  game: frostbite
+  mem_device: cuda
+game: frostbite
+mem_device: cuda
+title: mem_device=cuda; game=frostbite
