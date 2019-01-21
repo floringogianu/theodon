@@ -1,0 +1,8 @@
+_experiment_parameters:
+  game: seaquest
+  mem_device: cpu
+  prioritized: true
+game: seaquest
+mem_device: cpu
+prioritized: true
+title: mem_device=cpu; prioritized=True; game=seaquest
