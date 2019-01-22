@@ -4,7 +4,6 @@
 from functools import partial
 from typing import NamedTuple
 from numpy import random
-from gym.spaces import Discrete
 
 import torch
 from termcolor import colored as clr
@@ -71,7 +70,7 @@ def best_action_variance(ensemble_qvals, _action, votes=None):
             votes.put_(argmaxs, torch.ones_like(argmaxs), accumulate=True)
             votes = votes.view(batch_size, nactions)
         elif votes.ndimension() != 2:
-                raise ValueError("Expected batch_size x nactions tensor")
+            raise ValueError("Expected batch_size x nactions tensor")
         probs = votes.max(dim=1)[0].float() / votes.sum(dim=1).float()
         return probs * (1 - probs)
     raise ValueError("Unexepected number of dimensions")
@@ -96,7 +95,7 @@ class BootstrappedPE:
     def __init__(
         self,
         estimator,
-        action_space,
+        action_no,
         epsilon,
         is_thompson=False,
         vote=True,
@@ -114,12 +113,7 @@ class BootstrappedPE:
         except TypeError:
             self.__device = next(params[0]["params"]).device
 
-        self.action_space = action_space
-        try:
-            self.action_space.sample()
-        except AttributeError:
-            self.action_space = Discrete(self.action_space)
-
+        self.action_no = action_no
         self.epsilon = epsilon
         try:
             epsilon = next(self.epsilon)  # TODO: se consuma un eps aiurea :)
@@ -159,7 +153,7 @@ class BootstrappedPE:
 
         epsilon = next(self.epsilon)
         if epsilon < random.uniform():
-            action = random.randint(0, self.action_space.n)
+            action = random.randint(0, self.action_no)
             qval = qvals[action]
         else:
             qval, argmax_a = qvals.max(0)
@@ -183,7 +177,7 @@ class BootstrappedPE:
 
         epsilon = next(self.epsilon)
         if epsilon < random.uniform():
-            action = random.randint(0, self.action_space.n)
+            action = random.randint(0, self.action_no)
             qval = qvals[action]
         else:
             qval, argmax_a = qvals.max(0)
@@ -207,10 +201,10 @@ class BootstrappedPE:
         qvals, argmaxs = ensemble_qvals.max(1)
         votes = torch.zeros(act_no, dtype=argmaxs.dtype, device=argmaxs.device)
         votes.put_(argmaxs, torch.ones_like(argmaxs), accumulate=True)
-        
+
         epsilon = next(self.epsilon)
         if epsilon < random.uniform():
-            action = random.randint(0, self.action_space.n)
+            action = random.randint(0, self.action_no)
             qval = ensemble_qvals[:, action].mean()
         else:
             action = votes.argmax().item()
