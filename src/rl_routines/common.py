@@ -197,7 +197,8 @@ def create_memory(opt):
 
 
 def get_policy_improvement(opt, estimator):
-    # construct a policy improvement type
+    """ Construct a policy improvement type.
+    """
     optimizer = optim.RMSprop(
         estimator.parameters(),
         lr=opt.lr,
@@ -214,7 +215,6 @@ def get_policy_improvement(opt, estimator):
             optimizer,
             gamma=0.99,
             is_double=opt.double,
-            is_thompson=opt.boot.is_thompson,
             boot_mask=opt.boot.prob < 1,
             var_method=opt.boot.var_method,  # e.g. "selected_action"
         )
@@ -227,8 +227,8 @@ def get_policy_improvement(opt, estimator):
 
 
 def get_policy_evaluation(opt, estimator, action_no, train=True):
-    # construct an epsilon greedy policy
-    # also: epsilon = {'name':'linear', 'start':1, 'end':0.1, 'steps':1000}
+    """ Construct a policy evaluation type.
+    """
 
     if train:
         epsilon = get_epsilon(

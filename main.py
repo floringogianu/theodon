@@ -56,7 +56,6 @@ if __name__ == "__main__":
             thompson_sampling = opt.boot.is_thompson
         if thompson_sampling:
             ts_idx = opt.policy_evaluation.policy.sample_posterior_idx()
-            opt.policy_improvement.set_posterior_idx(ts_idx)
 
         state, reward, done = env.reset(), 0, False
         warmed_up = False
@@ -105,7 +104,6 @@ if __name__ == "__main__":
                 ep_cnt += 1
                 if thompson_sampling:
                     ts_idx = opt.policy_evaluation.policy.sample_posterior_idx()
-                    opt.policy_improvement.set_posterior_idx(ts_idx)
 
                 if ep_cnt % opt.log_freq == 0:
                     used_ram, used_gpu = get_process_memory()

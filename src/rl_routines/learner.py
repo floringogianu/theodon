@@ -51,9 +51,6 @@ def learn(opt):
             experience_replay.push(msg)
         msg = experience_queue.get()
 
-        if thompson_sampling:
-            opt.policy_improvement.set_posterior_idx(msg[1].posterior)        
-
         batch = opt.experience_replay.push_and_sample(msg)
         step += opt.update_freq
         msg = experience_queue.get()

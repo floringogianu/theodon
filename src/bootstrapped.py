@@ -92,7 +92,7 @@ class BootstrappedPE:
             components (`vote`==True).
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=bad-continuation
         self,
         estimator,
         action_no,
@@ -233,24 +233,19 @@ class BootstrappedPE:
 
     @property
     def estimator(self):
+        """ Return estimator. """
         return self.__estimator
 
 
 class BootstrappedPI(DQNPolicyImprovement):
     """ Manages the policy improvement step for bootstrapped estimators
-        (ensembles). It has three behaviours:
+        (ensembles). It has two behaviours:
 
-        1. Trains one ensemble component per episode, as in the original
-        paper. For this mode set `is_thompson=True` in the constructor and
-        call `posterior_idx(idx)` at the begining of each episode during
-        training. (Deep Exploration via Bootstrapped
-        DQN)[https://arxiv.org/abs/1602.04621]
+        1. Trains all the heads all the time. Bootstrapping is achieved
+        by masking transitions and training each ensemble component on its
+        assigned data only.
 
-        2. Trains all the heads all the time. Bootstrapping is achieved only
-        through masking transitions and training each ensemble component on its
-        assigned data only. Set `is_thompson=False`.
-
-        3. Trains all the heads all the time without masking.
+        2. Trains all the heads all the time without masking.
 
     Args:
         DQNPolicyImprovement (DQNPolicyImprovement): The default DQN update.
@@ -263,33 +258,22 @@ class BootstrappedPI(DQNPolicyImprovement):
         gamma,
         target_estimator=None,
         is_double=False,
-        is_thompson=False,
         boot_mask=True,
         var_method="selected_action",
     ):
         super().__init__(
             estimator, optimizer, gamma, target_estimator, is_double
         )
-        self.__is_thompson = is_thompson
-        self.__posterior_idx = None
 
         self._get_variance = eval(var_method + "_variance")
 
-        if is_thompson and boot_mask:
-            raise ValueError("Can't have both masks and Thompson Sampling, yet")
-
         cls_name = f"{self.__class__.__name__}"
-        if self.__is_thompson:
-            self.__get_dqn_loss = self.__thompson_update
-            print(clr(f"{cls_name} with Thompson Sampling.", "green"))
-        elif boot_mask:
+        if boot_mask:
             self.__get_dqn_loss = self.__bootstrapp_update
             print(clr(f"{cls_name} with Data Bootstrapping.", "green"))
-        elif not boot_mask:
+        else:
             self.__get_dqn_loss = self.__ensemble_update
             print(clr(f"{cls_name} with Plain Ensembles.", "green"))
-        else:
-            raise NotImplementedError("Not sure what to do...")
 
     def __call__(self, batch, cb=None):
         """ Overwrites the parent's methods.
@@ -303,14 +287,6 @@ class BootstrappedPI(DQNPolicyImprovement):
 
         loss.backward()
         self.update_estimator()
-
-    def set_posterior_idx(self, idx):
-        assert self.__is_thompson, (
-            "Calling this setter means you want to train the ensemble in a "
-            + "Thompson sampling setup but you didn't set `is_thompson` in the "
-            + "constructor."
-        )
-        self.__posterior_idx = idx
 
     def get_uncertainty(self, x, actions, are_features=True):
         """ Returns the predictive uncertainty of the model.
@@ -327,30 +303,9 @@ class BootstrappedPI(DQNPolicyImprovement):
 
         with torch.no_grad():
             ensemble_qvals = self.estimator(x, are_features=are_features)
-            self._get_variance(ensemble_qvals, actions)
-            qvals_var = ensemble_qvals.var(0).gather(1, actions)
+            qvals_var = self._get_variance(ensemble_qvals, actions)
+            # qvals_var = ensemble_qvals.var(0).gather(1, actions)
         return qvals_var
-
-    def __thompson_update(self, batch):
-        # scenario 1: sampled component, all data
-        batch = [el.to(self.device) for el in batch]
-        idx = self.__posterior_idx
-        loss = get_dqn_loss(
-            batch,
-            partial(self.estimator, mid=idx),
-            self.gamma,
-            target_estimator=partial(self.target_estimator, mid=idx),
-            is_double=self.is_double,
-        )
-
-        return DQNLoss(
-            loss=loss.loss,
-            priorities=self.get_uncertainty(
-                batch[0], batch[1], are_features=False
-            ),
-            q_values=None,
-            q_targets=None,
-        )
 
     def __bootstrapp_update(self, batch):
         # scenario 2: all ensemble components, masked data
