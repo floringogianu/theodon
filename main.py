@@ -47,7 +47,7 @@ if __name__ == "__main__":
         async_eval_result = None  # type: Optional[tuple]
         new_eval_results = None  # type: Tuple[int, nn.Module, float]
 
-        action_space = opt.policy_evaluation.action_space
+        action_space = env.action_space.n
         if opt.async_eval:
             executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
 
