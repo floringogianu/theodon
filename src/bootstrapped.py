@@ -152,7 +152,7 @@ class BootstrappedPE:
         qvals = ensemble_qvals[component_idx]
 
         epsilon = next(self.epsilon)
-        if epsilon < random.uniform():
+        if epsilon > random.uniform():
             action = random.randint(0, self.action_no)
             qval = qvals[action]
         else:
@@ -176,7 +176,7 @@ class BootstrappedPE:
         qvals = ensemble_qvals.mean(0)
 
         epsilon = next(self.epsilon)
-        if epsilon < random.uniform():
+        if epsilon > random.uniform():
             action = random.randint(0, self.action_no)
             qval = qvals[action]
         else:
@@ -203,7 +203,7 @@ class BootstrappedPE:
         votes.put_(argmaxs, torch.ones_like(argmaxs), accumulate=True)
 
         epsilon = next(self.epsilon)
-        if epsilon < random.uniform():
+        if epsilon > random.uniform():
             action = random.randint(0, self.action_no)
             qval = ensemble_qvals[:, action].mean()
         else:
