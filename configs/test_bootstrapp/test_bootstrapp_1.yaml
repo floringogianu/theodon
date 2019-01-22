@@ -1,0 +1,8 @@
+_experiment_parameters:
+  game: hero
+  lr: 6.25e-05
+  prioritized: true
+game: hero
+lr: 6.25e-05
+prioritized: true
+title: lr=6.25e-05; prioritized=True; game=hero

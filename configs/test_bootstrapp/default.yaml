@@ -1,0 +1,42 @@
+game: hero
+no_gym: yes
+step_no: 50000000
+seed: no  # randomize if 0 or no
+
+double: yes
+prioritized: no
+shared_bias: yes  # Tuned DDQN
+
+lr: 0.00025
+rmsprop_eps: 0.01
+rmsprop_momentum: 0.0
+
+boot:
+  k: 10
+  prob: 1  # no mask if boot_prob == 1
+  is_thompson: no
+  vote: yes
+  var_method: selected_action
+
+hidden_sz: 512
+hist_len: 4
+
+mem_size: 1000000
+async_memory: yes
+mem_device: cuda
+pinned_memory: no
+
+epsilon_steps: 1000000
+epsilon_end: 0.01  # Tuned DDQN
+
+update_freq: 4
+learn_start: 50000
+target_update: 30000  # Tuned DDQN
+
+log_freq: 1000
+learn_log_freq: 50000
+
+eval_freq: 1000000
+eval_steps: 125000
+eval_epsilon: 0.01  # table 5 in PER
+async_eval: yes
