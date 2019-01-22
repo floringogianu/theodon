@@ -1,4 +1,4 @@
-game: space_invaders
+game: pong
 no_gym: yes
 step_no: 100000
 seed: no  # randomize if 0 or no
@@ -16,32 +16,33 @@ shared_bias: yes
 boot:
   k: 10
   prob: 1  # no mask if boot_prob == 1
-  is_thompson: yes
+  is_thompson: no
   vote: yes
   var_method: selected_action
 
 linear_size: 512
+hist_len: 4
 
 lr: 0.00025
 rmsprop_eps: .01
 
-update_freq: 4
 epsilon_steps: 20000
 epsilon_end: 0.1
-target_update: 10000
 
+update_freq: 4
+target_update: 10000
 learn_start: 3000
+
 mem_size: 10000
-log_freq: 1
-hist_len: 4
+async_memory: yes
+mem_device: cuda
+pinned_memory: no
+
+log_freq: 5
 learn_log_freq: 1000
 
-eval_freq: 1000
-eval_steps: 200
+eval_freq: 30000
+eval_steps: 5000
 eval_epsilon: 0.05
 
 async_eval: yes
-async_memory: yes
-
-mem_device: cuda
-pinned_memory: no
