@@ -158,7 +158,7 @@ class BootstrappedPE:
                 dist = MultivariateNormal(means, covs)
                 break
             except RuntimeError:
-                covs += alpha * torch.eye(actions_no).unsqueeze(0)
+                covs += alpha * torch.eye(actions_no, device=means.device).unsqueeze(0)
                 alpha *= 10
         actions = dist.sample((1,)).argmax(dim=2)
         return actions.squeeze(1)
