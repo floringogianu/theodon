@@ -147,7 +147,7 @@ class BootstrappedPE:
     def _best_from_gaussian_sample_action(self, q_values):
         if q_values.ndimension() != 3:
             raise ValueError("q_values is supposed to be 3D.")
-        _, heads_no, _actions_no = q_values.shape
+        _, heads_no, actions_no = q_values.shape
         means = q_values.mean(dim=1)
         centered_qs = q_values - means.unsqueeze(1)
         covs = torch.bmm(centered_qs.transpose(1, 2), centered_qs) / heads_no
@@ -158,7 +158,7 @@ class BootstrappedPE:
                 dist = MultivariateNormal(means, covs)
                 break
             except RuntimeError:
-                covs += alpha * torch.eye(heads_no).unsqueeze(0)
+                covs += alpha * torch.eye(actions_no).unsqueeze(0)
                 alpha *= 10
         actions = dist.sample((1,)).argmax(dim=2)
         return actions.squeeze(1)
