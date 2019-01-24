@@ -1,0 +1,148 @@
+\documentclass[10pt]{article}
+\usepackage[margin=.75in]{geometry}
+\input{../my_math.tex}
+
+\begin{document}
+
+\section{Introduction and notations}
+\label{sec:intro}
+
+We have $K$ estimators that predict $Q$-values for $N$ actions. Let $q_a^k$ be
+the $k^{\text{th}}$ estimator's prediction for action $a$ in state $s$.
+
+We will use the following notations in this document:
+\begin{align}
+	q_a^k        & \overset{not.}{=} \func[q]{s, a \mid \theta_k}       \\
+	\hat{q}_a^k  & \overset{not.}{=} \func[q]{\hat{s}, a \mid \theta_k} \\
+	\bar{q_a}    & \overset{not.}{=} \frac{1}{K}\sum_{k=1}^{K} q_a^k  \\
+	\tensor{q}_a & \overset{not.}{=} \trans{\left[ q_a^1, q_a^2, \ldots, q_a^K \right]}
+\end{align}
+
+$\iverson{\cdot}$ represents the Iverson function.
+
+$x\sim \argmax{i}\func{i}$ means that we collect the set of all $i$ values that
+equally produce the maximum value of $f$ and then we sample uniformly from that
+set.
+
+\section{Policies}
+\label{sec:policies}
+
+\subsection{Deterministic policies}
+
+\subsubsection{Best mean}
+\begin{equation}
+	a^* = \argmax{a} \bar{q_a}
+\end{equation}
+
+\subsubsection{Most voted}
+\begin{equation}
+	a^* \sim \argmax{a} \sum_{k} \iverson{a = \argmax{i} q^k_i}
+\end{equation}
+
+\subsubsection{Most probable best from uncorrelated values}
+\begin{equation}
+	a^* \sim \argmax{a} \expected[q_i \sim \mathcal{U}\left\lbrace q^k_i : k \le K \right\rbrace]{\iverson{ a = \argmax{i}{q_i}}}
+\end{equation}
+
+\subsubsection{Most probable best from multivariate gaussian model}
+\begin{align}
+	\tensor{\mu}         & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                     \\
+	\tensor{\Sigma}_{ij} & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right)                \\
+	a^*                  & = \argmax{a}
+	\expected[{\tensor{q} \sim \func[\mathcal{N}]{\tensor{q} \cond \tensor{\mu}, \tensor{\Sigma} }}]{%
+		\iverson{a = \argmax{i} q_i}}                                                                                               \\
+	                     & = \argmax{a} \int_{\mathbb{R}^N} \func[\mathcal{N}]{\tensor{q} \cond \tensor{\mu}, \tensor{\Sigma} }
+	\iverson{q_a = \max_{i} q_i} d\tensor{q}
+\end{align}
+
+\subsection{Stochastic policies - for exploration}
+
+\subsubsection{Thompson}
+\begin{align*}
+	k & \sim \mathcal{U}\lbrace 1, \ldots, K \rbrace \\ a^* &= \argmax{i} q^k_i
+\end{align*}
+
+\subsubsection{Random best}
+\begin{align*}
+	a^* \sim \mathcal{U}\left\lbrace q^k : q^k = \argmax{i} q^k_i, k \le K \right\rbrace
+\end{align*}
+
+\subsubsection{Best from multivariate Gaussian sample}
+\begin{align*}
+	\tensor{\mu}         & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                      \\
+	\tensor{\Sigma}_{ij} & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right) \\
+	\mathbf{q}           & \sim \func[\mathcal{N}]{\mu, \Sigma}                                                  \\ \quad a^* &= \argmax{i} q_i
+\end{align*}
+
+
+\section{Variance as priority}
+
+\subsection{Variance of $\func[Q]{s,a}$}
+
+Here we consider that the variance of all estimators' predictions for the value
+function in $s, a$ measures how \emph{much} we need to sample a transition for
+that pair.
+
+\begin{align}
+	\func[\sigma^2]{\func[Q]{s,a}} & =
+	\frac{1}{K}\sum_{k=1}^{K} \left(q^k_a - \bar{q_a}\right)^2
+\end{align}
+
+\subsection{Variance of $a$ being the best action in $s$}
+
+Here we consider the variance of this decision:
+\emph{$a$ is the best action to be taken in $s$}.
+
+\subsubsection{Variance of being the best action from independent value functions}
+
+\begin{align}
+	p_a                                     & = \frac{1}{K}\sum_{k=1}^{K}
+	\iverson{a = \argmax{i} q^k_i }                                       \\
+	\func[\sigma^2]{a\text{ is best in } s} & = p_a \left(1 - p_a\right)
+\end{align}
+
+\subsubsection{Variance of being the best action from independent values}
+
+\begin{align}
+	p_a                                     & =
+	\expected[q_i \sim \lbrace q^k_i : k \le K \rbrace]{\iverson{a = \argmax{i} q_i}} \\
+	\func[\sigma^2]{a\text{ is best in } s} & = p_a \left(1 - p_a\right)
+\end{align}
+
+\subsubsection{Variance of being the best action from multivariate gaussian model}
+
+\begin{align}
+	\tensor{\mu}                            & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                 \\
+	\tensor{\Sigma}_{ij}                    & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right)            \\
+	p_a                                     & =
+	\expected[{\tensor{q} \sim \func[\mathcal{N}]{\tensor{q} \cond \tensor{\mu}, \tensor{\Sigma} }}]{%
+		\iverson{a = \argmax{i} q_i}}                                                                                                              \\
+	                                        & = \int_{\mathbb{R}^N} \func[\mathcal{N}]{\tensor{q} \middle\vert \tensor{\mu}, \tensor{\Sigma} }
+	\iverson{q_a = \max_{i} q_i}
+	d\tensor{q}                                                                                                                                \\
+	\func[\sigma^2]{a\text{ is best in } s} & = p_a \left(1 - p_a\right)
+\end{align}
+
+\subsection{TD error plus variance}
+
+Here we consider the observed transition $s, a, r, \hat{s}$. We also consider
+the next action $\hat{a}$ selected with our \emph{target} policy
+(see section \ref{sec:policies}). We would consider $f$ to be the priority
+associated with the given transition.
+
+\subsubsection{Variance of $\func[Q]{s,a}$}
+
+\begin{align}
+	\bar{\delta} & = \frac{1}{K}\sum_{k=1}^{K} \left| q_a^k - r - \gamma \hat{q}^k_{\hat{a}} \right|                                                                       \\
+	f            & = \bar{\delta} + \func[\sigma^2]{\func[Q]{s,a}} + \func[\sigma^2]{\func[Q]{\hat{s}, \hat{a}}} - \func[covar]{\func[Q]{s,a}, \func[Q]{\hat{s}, \hat{a}}}
+\end{align}
+
+\subsubsection{Variance of $a$ being best action in $s$}
+
+\begin{align}
+	\bar{\delta} & = \frac{1}{K}\sum_{k=1}^{K} \left| q_a^k - r - \gamma \hat{q}^k_{\hat{a}} \right|                              \\
+	f            & = \bar{\delta} + \func[\sigma^2]{a\text{ is best in } s} + \func[\sigma^2]{\hat{a}\text{ is best in } \hat{s}} \\
+	             & - \func[covar]{a\text{ is best in } s, \hat{a}\text{ is best in } \hat{s}}
+\end{align}
+
+\end{document}
