@@ -12,9 +12,9 @@ the $k^{\text{th}}$ estimator's prediction for action $a$ in state $s$.
 
 We will use the following notations in this document:
 \begin{align}
-	q_a^k        & \overset{not.}{=} \func[q]{s, a \mid \theta_k}       \\
-	\hat{q}_a^k  & \overset{not.}{=} \func[q]{\hat{s}, a \mid \theta_k} \\
-	\bar{q_a}    & \overset{not.}{=} \frac{1}{K}\sum_{k=1}^{K} q_a^k  \\
+	q_a^k        & \overset{not.}{=} \func[q]{s, a \mid \theta_k}                       \\
+	\hat{q}_a^k  & \overset{not.}{=} \func[q]{\hat{s}, a \mid \theta_k}                 \\
+	\bar{q_a}    & \overset{not.}{=} \frac{1}{K}\sum_{k=1}^{K} q_a^k                    \\
 	\tensor{q}_a & \overset{not.}{=} \trans{\left[ q_a^1, q_a^2, \ldots, q_a^K \right]}
 \end{align}
 
@@ -46,11 +46,11 @@ set.
 
 \subsubsection{Most probable best from multivariate gaussian model}
 \begin{align}
-	\tensor{\mu}         & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                     \\
-	\tensor{\Sigma}_{ij} & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right)                \\
+	\tensor{\mu}         & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                                         \\
+	\tensor{\Sigma}_{ij} & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right) \quad 1 \le i \le N, 1 \le j \le N \\
 	a^*                  & = \argmax{a}
 	\expected[{\tensor{q} \sim \func[\mathcal{N}]{\tensor{q} \cond \tensor{\mu}, \tensor{\Sigma} }}]{%
-		\iverson{a = \argmax{i} q_i}}                                                                                               \\
+		\iverson{a = \argmax{i} q_i}}                                                                                                                   \\
 	                     & = \argmax{a} \int_{\mathbb{R}^N} \func[\mathcal{N}]{\tensor{q} \cond \tensor{\mu}, \tensor{\Sigma} }
 	\iverson{q_a = \max_{i} q_i} d\tensor{q}
 \end{align}
@@ -64,14 +64,16 @@ set.
 
 \subsubsection{Random best}
 \begin{align*}
-	a^* \sim \mathcal{U}\left\lbrace q^k : q^k = \argmax{i} q^k_i, k \le K \right\rbrace
+	a^* \sim \mathcal{U}\left\lbrace q^k : q^k =
+	\argmax{i} q^k_i, k \le K \right\rbrace
 \end{align*}
 
 \subsubsection{Best from multivariate Gaussian sample}
 \begin{align*}
-	\tensor{\mu}         & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                      \\
-	\tensor{\Sigma}_{ij} & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right) \\
-	\mathbf{q}           & \sim \func[\mathcal{N}]{\mu, \Sigma}                                                  \\ \quad a^* &= \argmax{i} q_i
+	\tensor{\mu}         & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                                         \\
+	\tensor{\Sigma}_{ij} & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right) \quad 1 \le i \le N, 1 \le j \le N \\
+	\mathbf{q}           & \sim \func[\mathcal{N}]{\mu, \Sigma}                                                                                     \\
+	a^*                  & = \argmax{i} q_i
 \end{align*}
 
 
@@ -112,14 +114,14 @@ Here we consider the variance of this decision:
 \subsubsection{Variance of being the best action from multivariate gaussian model}
 
 \begin{align}
-	\tensor{\mu}                            & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                 \\
-	\tensor{\Sigma}_{ij}                    & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right)            \\
+	\tensor{\mu}                            & = \trans{\left[ \bar{q_1}, \bar{q_2}, \ldots, \bar{q_N} \right]}                                                         \\
+	\tensor{\Sigma}_{ij}                    & = \frac{1}{K}\sum_{k}^{K}\left(q^k_i -\bar{q_i}\right) \left( q^k_j -\bar{q_j}\right) \quad 1 \le i \le N, 1 \le j \le N \\
 	p_a                                     & =
 	\expected[{\tensor{q} \sim \func[\mathcal{N}]{\tensor{q} \cond \tensor{\mu}, \tensor{\Sigma} }}]{%
-		\iverson{a = \argmax{i} q_i}}                                                                                                              \\
+		\iverson{a = \argmax{i} q_i}}                                                                                                                                      \\
 	                                        & = \int_{\mathbb{R}^N} \func[\mathcal{N}]{\tensor{q} \middle\vert \tensor{\mu}, \tensor{\Sigma} }
 	\iverson{q_a = \max_{i} q_i}
-	d\tensor{q}                                                                                                                                \\
+	d\tensor{q}                                                                                                                                                        \\
 	\func[\sigma^2]{a\text{ is best in } s} & = p_a \left(1 - p_a\right)
 \end{align}
 
