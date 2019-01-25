@@ -187,8 +187,8 @@ def create_memory(opt):
         experience_replay = PER(
             experience_replay,
             opt.async_memory,
-            alpha=0.6,
-            beta=0.4,
+            alpha=(opt.per_alpha if hasattr(opt, "per_alpha") else 0.6),
+            beta=(opt.per_beta if hasattr(opt, "per_beta") else 0.4),
             optim_steps=((opt.step_no - opt.learn_start) / opt.update_freq),
         )
         cb = priority_update
