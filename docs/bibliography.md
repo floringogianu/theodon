@@ -37,6 +37,13 @@ Algorithms](http://www.inference.org.uk/itprnn/book.pdf)
    Learning](https://arxiv.org/abs/1506.02142)
 
 
+## Some papers on Thompson sampling and PSRL:
+
+1. [Why Posterior Sampling is better than Optimism for RL?](https://arxiv.org/pdf/1607.00215.pdf)
+2. [Deep Bayesian Bandits Showdown: An Empirical Comparison of Bayesian Deep Networks for Thompson Sampling](https://arxiv.org/abs/1802.09127)
+3. [A Tutorial on Thompson Sampling](https://arxiv.org/abs/1707.02038)
+
+
 ## Other methods
 
 We are interested however in methods that show good promise from a practical
