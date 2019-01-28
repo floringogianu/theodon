@@ -1,0 +1,8 @@
+_experiment_parameters:
+  game: amidar
+  mem_device: cuda
+  prioritized: true
+game: amidar
+mem_device: cuda
+prioritized: true
+title: mem_device=cuda; prioritized=True; game=amidar

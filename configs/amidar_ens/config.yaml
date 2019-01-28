@@ -1,0 +1,10 @@
+
+game:
+  - amidar
+
+prioritized:
+  - yes
+
+mem_device:
+  - cuda
+  - cpu
