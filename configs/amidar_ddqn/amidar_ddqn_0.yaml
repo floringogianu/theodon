@@ -1,0 +1,6 @@
+_experiment_parameters:
+  game: amidar
+  mem_device: cuda
+game: amidar
+mem_device: cuda
+title: mem_device=cuda; game=amidar

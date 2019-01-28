@@ -1,0 +1,7 @@
+game:
+  - amidar
+
+mem_device:
+  - cuda
+  - cpu
+
